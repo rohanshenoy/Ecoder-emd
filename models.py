@@ -5,25 +5,35 @@ import keras as kr
 import qkeras.qkeras as qkr
 
 
-def autoCNN(shape=(12,4,1),weights_f=''):
+def autoCNN(N_filters=[16,8,4],conv_filter=(3,3),pool_filter=(2,2),shape=(12,4,1),weights_f=''):
 
   input_img = Input(shape)  # adapt this if using `channels_first` image data format
+
+  for i,ifilter in enumerate(N_filters):
+    if i==0:
+      ### use input_img for first conv layer
+      x = Conv2D(ifilter, conv_filter, activation='relu', padding='same')(input_img)
+    else:
+      x = Conv2D(ifilter, conv_filter, activation='relu', padding='same')(x)
+    if i!=len(N_filters)-1:
+      x = MaxPooling2D(pool_filter, padding='same')(x)
+    else:
+      ### make encoded tensor for last pooling layer 
+      encoded = MaxPooling2D(pool_filter, padding='same')(x)
   
-  x = Conv2D(16, (3, 3), activation='relu', padding='same')(input_img)
-  x = MaxPooling2D((2, 2), padding='same')(x)
-  x = Conv2D(8, (3, 3), activation='relu', padding='same')(x)
-  x = MaxPooling2D((2, 2), padding='same')(x)
-  x = Conv2D(4, (3, 3), activation='relu', padding='same')(x)
-  encoded = MaxPooling2D((2, 2), padding='same')(x)
-  
-  # at this point the representation is (4, 4, 8) i.e. 128-dimensional
-  x = Conv2D(4, (3, 3), activation='relu', padding='same')(encoded)
-  x = UpSampling2D((2, 2))(x)
-  x = Conv2D(8, (3, 3), activation='relu', padding='same')(x)
-  x = UpSampling2D((2, 2))(x)
-  x = Conv2D(16, (3, 3), activation='relu')(x)
-  x = UpSampling2D((2, 2))(x)
-  decoded = Conv2D(1, (3, 3), activation='sigmoid', padding='same')(x)
+  ## decoder part
+  for i,ifilter in enumerate(N_filters[::-1]):
+    if i==0:
+      ### use input_img for first conv layer
+      x = Conv2D(ifilter, conv_filter, activation='relu', padding='same')(encoded)
+    elif i==len(N_filters)-1:
+      x = Conv2D(ifilter, conv_filter, activation='relu')(x)        # no padding for last conv layer to keep the shape
+    else:
+      x = Conv2D(ifilter, conv_filter, activation='relu', padding='same')(x)
+    x = UpSampling2D(pool_filter)(x)
+
+  ## output layer
+  decoded = Conv2D(1, conv_filter, activation='sigmoid', padding='same')(x)
   
   encoder     = Model(input_img, encoded)
   autoencoder = Model(input_img, decoded)

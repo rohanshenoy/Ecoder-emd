@@ -88,9 +88,13 @@ def cross_corr(x,y):
     corr = cov / np.multiply.outer(std, std)
     return corr[0,1]
 
-def visualize(input_Q,decoded_Q,encoded_Q,Nevents=8,name='model_X'):
-  #randomly pick Nevents
-  index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
+def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
+  if index.size==0:
+    Nevents=8
+    #randomly pick Nevents if index is not specified
+    index = np.random.choice(input_Q.shape[0], Nevents, replace=False) 
+  else:
+    Nevents = len(index) 
   
   inputImg    = input_Q[index]
   encodedImg  = encoded_Q[index]
@@ -123,7 +127,30 @@ def visualize(input_Q,decoded_Q,encoded_Q,Nevents=8,name='model_X'):
   plt.tight_layout()
   plt.savefig("%s_examples.jpg"%name)
   
-  plt.show()
+  #plt.show()
+  def plothist(y,xlabel,name):
+    plt.figure(figsize=(6,4))
+    plt.hist(y,50)
+    
+    mu = np.mean(y)
+    std = np.std(y)
+    ax = plt.axes()
+    plt.text(0.1, 0.9, name,transform=ax.transAxes)
+    plt.text(0.1, 0.8, r'$\mu=%.3f,\ \sigma=%.3f$'%(mu,std),transform=ax.transAxes)
+    plt.xlabel(xlabel)
+    plt.ylabel('Entry')
+    plt.title('%s on validation set'%xlabel)
+    plt.savefig("hist_%s.jpg"%name)
+    #plt.show()
+
+  cross_corr_arr = np.array( [cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
+  ssd_arr        = np.sum((input_Q-decoded_Q)**2,(1,2))
+
+  plothist(cross_corr_arr,'cross correlation',name+"_corr")
+  plothist(ssd_arr,'sum squared difference',name+"_ssd")
+
+  return cross_corr_arr,ssd_arr
+
 
 def vis1d(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
   #Nevents = 50
@@ -212,22 +239,44 @@ def trainDeepAutoEncoder(options,args):
     os.chdir('../')
   print(summary)
 
-def main(options,args):
-  full_input, val_input, train_input = prepInput(reshape=False)
+def trainCNN(options,args):
+  full_input, val_input, train_input = prepInput(nrows =50000)
+  Nevents = 8 
+  input_Q            = np.reshape(val_input,(len(val_input),12,4))
+  index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
 
-  w_CNN  = 'autoencoder_CNN_16_8_4_full.hdf5'
-  w_qCNN = 'autoencoder_qCNN_4bit_16_8_4.hdf5'
-  m_autoCNN , m_autoCNNen                = autoCNN(weights_f=w_CNN)
-  m_QautoCNN, m_QautoCNNen               = QautoCNN(weights_f=w_qCNN)
-
-  #input_Q            = np.reshape(val_input,(len(val_input),12,4))
-  #cnn_deQ ,cnn_enQ   = predict(val_input,m_autoCNN,m_autoCNNen)
+  #w_CNN  = 'autoencoder_CNN_16_8_4_full.hdf5'
+  #w_qCNN = 'autoencoder_qCNN_4bit_16_8_4.hdf5'
+  #m_QautoCNN, m_QautoCNNen               = QautoCNN(weights_f=w_qCNN)
   #qcnn_deQ,qcnn_enQ  = predict(val_input,m_QautoCNN,m_QautoCNNen)
+  #history = train(m_autoCNN,train_input,val_input) 
+  models = [
+    #{'filters':[16,8,4]         ,'ws':'CNN16_8_4.hdf5'},
+    {'filters':[16,8,4]         ,'ws':'CNN16_8_4.hdf5'},
+  ]
 
-  #history = train(m_autoCNN,train_input,val_input)  
-  #visualize(input_Q,cnn_deQ,cnn_enQ,name='CNN_test')
-  #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
+  summary = pd.DataFrame(columns=['name','corr','ssd'])
+  os.chdir('./CNN/')
+  for model in models:
+    model_name = "CNN"+"_".join([str(d) for d in model['filters']])
+    if not os.path.exists(model_name):
+      os.mkdir(model_name)
+    os.chdir(model_name)
+    m_autoCNN , m_autoCNNen    = autoCNN(N_filters= model['filters'],weights_f=model['ws'])
+    #m_autoCNN.summary()
+    if model['ws']=='':
+      history = train(m_autoCNN,train_input,val_input,name=model_name)
+    cnn_deQ ,cnn_enQ   = predict(val_input,m_autoCNN,m_autoCNNen)
+    corr_arr, ssd_arr  = visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
 
+    model['corr'] = np.round(np.mean(corr_arr),3)
+    model['ssd'] = np.round(np.mean(ssd_arr),3)
+
+    summary = summary.append({'name':model_name,'corr':model['corr'],'ssd':model['ssd']},ignore_index=True)
+
+    #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
+
+  print(summary)
 
 
 if __name__== "__main__":
@@ -236,7 +285,7 @@ if __name__== "__main__":
     parser.add_option('-o',"--odir", type="string", default = 'ntuple.root',dest="inputFile", help="input TSG ntuple")
 
     (options, args) = parser.parse_args()
-    trainDeepAutoEncoder(options,args)
-    #main(options,args)
+    #trainDeepAutoEncoder(options,args)
+    trainCNN(options,args)
 
 
