@@ -8,19 +8,47 @@ import os
 import matplotlib.pyplot as plt
 from models import *
 
-def prepInput(reshape=True,nrows=None):
-  #data = pd.read_csv("CALQ_output_10x.csv")  ## big  300k file
+import numba
+from denseCNN import denseCNN 
+@numba.jit
+def normalize(data):
+    for i in range(len(data)):
+        data[i] = 1.*data[i]/data[i].max()
+    return data
+
+def prepInput(shape=[],nrows=None,reorder=False):
   data = pd.read_csv("CALQ_output_10x.csv",nrows=nrows)  ## big  300k file
   
-  normData = data.apply(lambda x: x/max(x),axis=1)
-  inputdata = normData.values
+  inputdata = normalize(data.values.copy())
 
-  if reshape: 
-    shaped_data = np.reshape(inputdata,(len(inputdata),12,4,1))
+  if reorder:
+      newOrder = np.array([
+          28,29,30,31,0,4,8,12,
+          24,25,26,27,1,5,9,13,
+          20,21,22,23,2,6,10,14,
+          16,17,18,19,3,7,11,15,
+          47,43,39,35,35,34,33,32,
+          46,42,38,34,39,38,37,36,
+          45,41,37,33,43,42,41,40,
+          44,40,36,32,47,46,45,44])
+      orderMask = np.array([
+              1,1,1,1,1,1,1,1,
+              1,1,1,1,1,1,1,1,
+              1,1,1,1,1,1,1,1,
+              1,1,1,1,1,1,1,1,
+              1,1,1,1,1,1,1,1,
+              1,1,1,0,0,1,1,1,
+              1,1,0,0,0,0,0,1,
+              1,0,0,0,0,0,0,1,])
+      inputdata = inputdata[:,newOrder]
+      inputdata[:,orderMask==0]=0  #zeros out repeated entries
+
+  if len(shape)>0: 
+    shaped_data = np.reshape(inputdata,(len(inputdata),shape[0],shape[1],shape[2]))
   else:
     shaped_data = inputdata
-  
-  validation_frac = 0.2
+
+def split(shaped_data, validation_frac=0.2):
   N = round(len(shaped_data)*validation_frac)
   
   #randomly select 25% entries
@@ -32,12 +60,12 @@ def prepInput(reshape=True,nrows=None):
   val_input = shaped_data[index]
   train_input = shaped_data[train_index]
 
-  #print(train_input.shape)
-  #print(val_input.shape)
+  print(train_input.shape)
+  print(val_input.shape)
 
-  return shaped_data,val_input,train_input
+  return val_input,train_input
 
-def train(autoencoder,train_input,val_input,name):
+def train(autoencoder,encoder,train_input,val_input,name):
 
   es = kr.callbacks.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=5)
   history = autoencoder.fit(train_input,train_input,
@@ -61,7 +89,11 @@ def train(autoencoder,train_input,val_input,name):
   json_string = autoencoder.to_json()
   with open('./%s.json'%name,'w') as f:
       f.write(json_string)
+  json_string = encoder.to_json()
+  with open('./%s.json'%("encoder_"+name),'w') as f:
+      f.write(json_string)
   autoencoder.save_weights('%s.hdf5'%name)
+  encoder.save_weights('%s.hdf5'%("encoder_"+name))
 
   return history
 
@@ -126,7 +158,8 @@ def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
   
   plt.tight_layout()
   plt.savefig("%s_examples.jpg"%name)
-  
+ 
+def visMetric(input_Q,decoded_Q,name): 
   #plt.show()
   def plothist(y,xlabel,name):
     plt.figure(figsize=(6,4))
@@ -227,7 +260,7 @@ def trainDeepAutoEncoder(options,args):
     #m_deepAuto.summary()
     #m_deepAutoEn.summary()
     if model['ws']=='':
-      history = train(m_deepAuto,train_input,val_input,name=model_name)
+      history = train(m_deepAuto,m_deepAutoEn,train_input,val_input,name=model_name)
     deQ, enQ = predict(val_input,m_deepAuto,m_deepAutoEn,False)
     corr_arr, ssd_arr = vis1d(val_input,deQ,enQ,index,model_name)
     model['corr'] = np.round(np.mean(corr_arr),3)
@@ -240,34 +273,46 @@ def trainDeepAutoEncoder(options,args):
   print(summary)
 
 def trainCNN(options,args):
-  full_input, val_input, train_input = prepInput(nrows =50000)
-  Nevents = 8 
-  input_Q            = np.reshape(val_input,(len(val_input),12,4))
-  index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
 
-  #w_CNN  = 'autoencoder_CNN_16_8_4_full.hdf5'
-  #w_qCNN = 'autoencoder_qCNN_4bit_16_8_4.hdf5'
-  #m_QautoCNN, m_QautoCNNen               = QautoCNN(weights_f=w_qCNN)
-  #qcnn_deQ,qcnn_enQ  = predict(val_input,m_QautoCNN,m_QautoCNNen)
-  #history = train(m_autoCNN,train_input,val_input) 
+  data = pd.read_csv("CALQ_output_10x.csv",dtype=np.float64)  ## big  300k file
+  normdata = normalize(data.values.copy())
+
   models = [
     #{'filters':[16,8,4]         ,'ws':'CNN16_8_4.hdf5'},
-    {'filters':[16,8,4]         ,'ws':'CNN16_8_4.hdf5'},
+    #{'filters':[16,8,4]         ,'ws':'CNN16_8_4.hdf5'},
+    #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },
+    {'name':'denseCNN_2',  'ws':'denseCNN_2.hdf5', 'pams':{'shape':(8,8,1) } },
   ]
 
   summary = pd.DataFrame(columns=['name','corr','ssd'])
   os.chdir('./CNN/')
   for model in models:
-    model_name = "CNN"+"_".join([str(d) for d in model['filters']])
+    model_name = model['name']
     if not os.path.exists(model_name):
       os.mkdir(model_name)
     os.chdir(model_name)
-    m_autoCNN , m_autoCNNen    = autoCNN(N_filters= model['filters'],weights_f=model['ws'])
-    #m_autoCNN.summary()
+   
+    m = denseCNN(weights_f=model['ws']) 
+    m.setpams(model['pams'])
+    m.init()
+    shaped_data                = m.prepInput(normdata)
+    val_input, train_input     = split(shaped_data)
+    m_autoCNN , m_autoCNNen    = m.get_models()
     if model['ws']=='':
-      history = train(m_autoCNN,train_input,val_input,name=model_name)
-    cnn_deQ ,cnn_enQ   = predict(val_input,m_autoCNN,m_autoCNNen)
-    corr_arr, ssd_arr  = visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
+      history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name)
+
+    Nevents = 8 
+    input_Q            = np.reshape(val_input,(len(val_input),8,8))
+    index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
+
+    cnn_deQ ,cnn_enQ   = m.predict(val_input)
+    corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,name=model_name)
+
+    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
+    index = np.random.choice(np.where(corr_arr>0.9)[0], Nevents, replace=False)  
+    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
+    index = np.random.choice(np.where(corr_arr<0.2)[0], Nevents, replace=False)  
+    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.1")
 
     model['corr'] = np.round(np.mean(corr_arr),3)
     model['ssd'] = np.round(np.mean(ssd_arr),3)
