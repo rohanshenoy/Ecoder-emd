@@ -7,13 +7,15 @@ class denseCNN:
     def __init__(self,name='',weights_f=''):
         self.name=name
         self.pams ={
-            'encoded_dim'      : 12,
-            'CNN_layer_nodes'  : [8],
+            'CNN_layer_nodes'  : [8],  #n_filters
             'CNN_kernel_size'  : [3],
             'CNN_pool'         : [False],
             'Dense_layer_nodes': [], #does not include encoded layer
+            'encoded_dim'      : 12,
             'shape'            : (1,4,4),
-            'channels_first'   : False
+            'channels_first'   : False,
+            'arrange'          : [],
+            'arrMask'          : [],
         }
         self.weights_f =weights_f
         
@@ -24,29 +26,15 @@ class denseCNN:
             
     def prepInput(self,normData):
       shape = self.pams['shape']
-      newOrder = np.array([
-          28,29,30,31,0,4,8,12,
-          24,25,26,27,1,5,9,13,
-          20,21,22,23,2,6,10,14,
-          16,17,18,19,3,7,11,15,
-          47,43,39,35,35,34,33,32,
-          46,42,38,34,39,38,37,36,
-          45,41,37,33,43,42,41,40,
-          44,40,36,32,47,46,45,44])
-      orderMask = np.array([
-              1,1,1,1,1,1,1,1,
-              1,1,1,1,1,1,1,1,
-              1,1,1,1,1,1,1,1,
-              1,1,1,1,1,1,1,1,
-              1,1,1,1,1,1,1,1,
-              1,1,1,0,0,1,1,1,
-              1,1,0,0,0,0,0,1,
-              1,0,0,0,0,0,0,1,])
-      inputdata = normData[:,newOrder]
-      inputdata[:,orderMask==0]=0  #zeros out repeated entries
+      
+      if len(self.pams['arrange'])>0:
+          arrange = self.pams['arrange']
+          inputdata = normData[:,arrange]
+      if len(self.pams['arrMask'])>0:
+          arrMask = self.pams['arrMask']
+          inputdata[:,arrMask==0]=0  #zeros out repeated entries
 
       shaped_data = inputdata.reshape(len(inputdata),shape[0],shape[1],shape[2])
-      #shaped_data = np.reshape(inputdata,(len(inputdata),shape[0],shape[1],shape[2]))
 
       return shaped_data
             
@@ -71,7 +59,7 @@ class denseCNN:
               if channels_first:
                 x = MaxPooling2D((2, 2), padding='same',data_format='channels_first')(x)
               else:
-                x = MaxPooling2D((2, 2), padding='same',data_format='channels_first')(x)
+                x = MaxPooling2D((2, 2), padding='same')(x)
 
         shape = K.int_shape(x)
 
@@ -99,13 +87,17 @@ class denseCNN:
 
         for i,n_nodes in enumerate(CNN_layer_nodes):
             if CNN_pool[i]:
-                x = UpSampling2D((2, 2))(x)
+              if channels_first:
+                  x = UpSampling2D((2, 2),data_format='channels_first')(x)
+              else:
+                  x = UpSampling2D((2, 2))(x)
             if channels_first:
               x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',data_format='channels_first')(x)
             else:
               x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same')(x)
 
         if channels_first:
+          #shape[0] will be # of channel
           x = Conv2DTranspose(filters=self.shape[0],kernel_size=3,padding='same',data_format='channels_first')(x)
         else:
           x = Conv2DTranspose(filters=1,kernel_size=3,padding='same')(x)
@@ -148,5 +140,11 @@ class denseCNN:
         decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0],s[1]))
         encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
         return decoded_Q, encoded_Q
+
+    def summary(self):
+      self.encoder.summary()
+      self.decoder.summary()
+      self.autoencoder.summary()
+
 
 
