@@ -277,14 +277,34 @@ def trainCNN(options,args):
   data = pd.read_csv("CALQ_output_10x.csv",dtype=np.float64)  ## big  300k file
   normdata = normalize(data.values.copy())
 
+  arrange8x8 = np.array([
+              28,29,30,31,0,4,8,12,
+              24,25,26,27,1,5,9,13,
+              20,21,22,23,2,6,10,14,
+              16,17,18,19,3,7,11,15,
+              47,43,39,35,35,34,33,32,
+              46,42,38,34,39,38,37,36,
+              45,41,37,33,43,42,41,40,
+              44,40,36,32,47,46,45,44])
+  arrMask  =  np.array([
+              1,1,1,1,1,1,1,1,
+              1,1,1,1,1,1,1,1,
+              1,1,1,1,1,1,1,1,
+              1,1,1,1,1,1,1,1,
+              1,1,1,1,1,1,1,1,
+              1,1,1,0,0,1,1,1,
+              1,1,0,0,0,0,0,1,
+              1,0,0,0,0,0,0,1,])
+
   models = [
     #{'filters':[16,8,4]         ,'ws':'CNN16_8_4.hdf5'},
     #{'filters':[16,8,4]         ,'ws':'CNN16_8_4.hdf5'},
     #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },
-    {'name':'denseCNN_2',  'ws':'denseCNN_2.hdf5', 'pams':{'shape':(8,8,1) } },
+    {'name':'denseCNN_2',  'ws':'denseCNN_2.hdf5', 
+      'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask  } },
   ]
 
-  summary = pd.DataFrame(columns=['name','corr','ssd'])
+  summary = pd.DataFrame(columns=['name','en_pams','tot_pams','corr','ssd'])
   os.chdir('./CNN/')
   for model in models:
     model_name = model['name']
@@ -312,12 +332,18 @@ def trainCNN(options,args):
     index = np.random.choice(np.where(corr_arr>0.9)[0], Nevents, replace=False)  
     visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
     index = np.random.choice(np.where(corr_arr<0.2)[0], Nevents, replace=False)  
-    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.1")
+    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
 
     model['corr'] = np.round(np.mean(corr_arr),3)
     model['ssd'] = np.round(np.mean(ssd_arr),3)
 
-    summary = summary.append({'name':model_name,'corr':model['corr'],'ssd':model['ssd']},ignore_index=True)
+    summary = summary.append({'name':model_name,
+                              'corr':model['corr'],
+                              'ssd':model['ssd'],
+                              'en_pams' : m_autoCNNen.count_params(),
+                              'tot_pams': m_autoCNN.count_params(),
+                              'ssd':model['ssd'],
+                              },ignore_index=True)
 
     #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
 
