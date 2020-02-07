@@ -2,6 +2,7 @@ from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatt
 from keras.models import Model
 from keras import backend as K
 import numpy as np
+import json
 
 class denseCNN:
     def __init__(self,name='',weights_f=''):
@@ -38,7 +39,7 @@ class denseCNN:
 
       return shaped_data
             
-    def init(self):
+    def init(self,printSummary=True):
         encoded_dim = self.pams['encoded_dim']
 
         CNN_layer_nodes   = self.pams['CNN_layer_nodes']
@@ -73,7 +74,8 @@ class denseCNN:
 
         # Instantiate Encoder Model
         self.encoder = Model(inputs, encodedLayer, name='encoder')
-        self.encoder.summary()
+        if printSummary:
+          self.encoder.summary()
 
         encoded_inputs = Input(shape=(encoded_dim,), name='decoder_input')
         x = encoded_inputs
@@ -106,12 +108,15 @@ class denseCNN:
 
 
         self.decoder = Model(encoded_inputs, outputs, name='decoder')
-        self.decoder.summary()
+        if printSummary:
+          self.decoder.summary()
 
         self.autoencoder = Model(inputs, self.decoder(self.encoder(inputs)), name='autoencoder')
-        self.autoencoder.summary()
+        if printSummary:
+          self.autoencoder.summary()
 
         self.autoencoder.compile(loss='mse', optimizer='adam')
+        self.encoder.compile(loss='mse', optimizer='adam')
 
         CNN_layers=''
         if len(CNN_layer_nodes)>0:
@@ -146,5 +151,13 @@ class denseCNN:
       self.decoder.summary()
       self.autoencoder.summary()
 
-
-
+    ##get pams for writing json
+    def get_pams(self):
+      jsonpams={}
+      for k,v in self.pams.items():
+          if type(v)==type(np.array([])):
+              jsonpams[k] = v.tolist()
+          else:
+              jsonpams[k] = v 
+      return jsonpams   
+      
