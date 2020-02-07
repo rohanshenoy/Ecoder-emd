@@ -100,7 +100,7 @@ class denseCNN:
 
         if channels_first:
           #shape[0] will be # of channel
-          x = Conv2DTranspose(filters=self.shape[0],kernel_size=3,padding='same',data_format='channels_first')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=3,padding='same',data_format='channels_first')(x)
         else:
           x = Conv2DTranspose(filters=1,kernel_size=3,padding='same')(x)
 
