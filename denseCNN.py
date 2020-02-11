@@ -31,6 +31,8 @@ class denseCNN:
       if len(self.pams['arrange'])>0:
           arrange = self.pams['arrange']
           inputdata = normData[:,arrange]
+      else:
+          inputdata = normData
       if len(self.pams['arrMask'])>0:
           arrMask = self.pams['arrMask']
           inputdata[:,arrMask==0]=0  #zeros out repeated entries
