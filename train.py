@@ -10,11 +10,14 @@ from models import *
 
 import numba
 from denseCNN import denseCNN 
+
 @numba.jit
 def normalize(data):
+    norm =[]
     for i in range(len(data)):
+        norm.append( data[i].max() )
         data[i] = 1.*data[i]/data[i].max()
-    return data
+    return data,np.array(norm)
 
 def prepInput(shape=[],nrows=None,reorder=False):
   data = pd.read_csv("CALQ_output_10x.csv",nrows=nrows)  ## big  300k file
@@ -65,12 +68,12 @@ def split(shaped_data, validation_frac=0.2):
 
   return val_input,train_input
 
-def train(autoencoder,encoder,train_input,val_input,name):
+def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
 
-  es = kr.callbacks.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=5)
+  es = kr.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=1)
   history = autoencoder.fit(train_input,train_input,
-                epochs=150,
-                batch_size=200,
+                epochs=n_epochs,
+                batch_size=500,
                 shuffle=True,
                 validation_data=(val_input,val_input),
                 callbacks=[es]
@@ -120,6 +123,12 @@ def cross_corr(x,y):
     corr = cov / np.multiply.outer(std, std)
     return corr[0,1]
 
+def ssd(x,y):
+    ssd=np.sum(((x-y)**2).flatten())
+    ssd = ssd/(np.sum(x**2)*np.sum(y**2))**0.5
+    return ssd
+
+
 def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
   if index.size==0:
     Nevents=8
@@ -159,7 +168,7 @@ def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
   plt.tight_layout()
   plt.savefig("%s_examples.jpg"%name)
  
-def visMetric(input_Q,decoded_Q,name): 
+def visMetric(input_Q,decoded_Q,maxQ,name): 
   #plt.show()
   def plothist(y,xlabel,name):
     plt.figure(figsize=(6,4))
@@ -174,13 +183,30 @@ def visMetric(input_Q,decoded_Q,name):
     plt.ylabel('Entry')
     plt.title('%s on validation set'%xlabel)
     plt.savefig("hist_%s.jpg"%name)
-    #plt.show()
+
 
   cross_corr_arr = np.array( [cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
-  ssd_arr        = np.sum((input_Q-decoded_Q)**2,(1,2))
+  ssd_arr        = np.array([ssd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
 
   plothist(cross_corr_arr,'cross correlation',name+"_corr")
   plothist(ssd_arr,'sum squared difference',name+"_ssd")
+
+  plt.figure(figsize=(6,4))
+  plt.hist([input_Q.flatten(),decoded_Q.flatten()],20,label=['input','output'])
+  plt.yscale('log')
+  plt.legend(loc='upper right')
+  plt.xlabel('Charge fraction')
+  plt.savefig("hist_Qfr_%s.jpg"%name)
+
+  input_Q_abs   = np.array([input_Q[i] * maxQ[i] for i in range(0,len(input_Q))])
+  decoded_Q_abs = np.array([decoded_Q[i]*maxQ[i] for i in range(0,len(decoded_Q))])
+
+  plt.figure(figsize=(6,4))
+  plt.hist([input_Q_abs.flatten(),decoded_Q_abs.flatten()],20,label=['input','output'])
+  plt.yscale('log')
+  plt.legend(loc='upper right')
+  plt.xlabel('Charge')
+  plt.savefig("hist_Qabs_%s.jpg"%name)
 
   return cross_corr_arr,ssd_arr
 
@@ -274,8 +300,8 @@ def trainDeepAutoEncoder(options,args):
 
 def trainCNN(options,args):
 
-  data = pd.read_csv("CALQ_output_10x.csv",dtype=np.float64)  ## big  300k file
-  normdata = normalize(data.values.copy())
+  data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
+  normdata,maxdata = normalize(data.values.copy())
 
   arrange8x8 = np.array([
               28,29,30,31,0,4,8,12,
@@ -297,15 +323,49 @@ def trainCNN(options,args):
               1,0,0,0,0,0,0,1,])
 
   models = [
-    #{'filters':[16,8,4]         ,'ws':'CNN16_8_4.hdf5'},
-    #{'filters':[16,8,4]         ,'ws':'CNN16_8_4.hdf5'},
     #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },
-    {'name':'denseCNN_2',  'ws':'denseCNN_2.hdf5', 
-      'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask  } },
+    #{'name':'denseCNN_2',  'ws':'denseCNN_2.hdf5', 
+    #  'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask  } },
+
+    #{'name':'8x8_nomask','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8  }},
+    #{'name':'nfil4','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'CNN_layer_nodes':[4]}},
+    #{'name':'nfils_842','ws':'nfils_842.hdf5','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,
+    #        'CNN_layer_nodes':[8,4,2],
+    #        'CNN_kernel_size':[3,3,3],
+    #        'CNN_pool':[False,False,False],     
+    #}} , 
+    #{'name':'nfils_842_pool2','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,
+    #        'CNN_layer_nodes':[8,4,2],
+    #        'CNN_kernel_size':[3,3,3],
+    #        'CNN_pool':[False,True,False],     
+    #}} , 
+    #{'name':'8x8_dim10','ws':'','vis_shape':(8,8),'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':10}},
+    #{'name':'8x8_dim8','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':8}},
+    #{'name':'8x8_dim4','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':4}},
+    {'name':'4x4_norm','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True }},
+    #{'name':'12x4_norm','ws':'','vis_shape':(12,4),'pams':{'shape':(12,4,1),
+    #        'CNN_layer_nodes':[8,4,4,2],
+    #        'CNN_kernel_size':[3,3,3,3],
+    #        'CNN_pool':[False,False,False,False],     
+    #}},
+    #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
+    #     'CNN_layer_nodes':[8,8],
+    #     'CNN_kernel_size':[3,3],
+    #     'CNN_pool':[False,False], 
+    #}},
+    #{'name':'4x4_v2',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
+    #     'CNN_layer_nodes':[8,8],
+    #     'CNN_kernel_size':[3,3],
+    #     'CNN_pool':[False,False], 
+    #     'Dense_layer_nodes':[16],
+    #}},
+    #{'name':'4x4_v3' ,'ws':'4x4_v3.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,'CNN_kernel_size':[2]}},
   ]
 
   summary = pd.DataFrame(columns=['name','en_pams','tot_pams','corr','ssd'])
-  os.chdir('./CNN/')
+  #os.chdir('./CNN/')
+  #os.chdir('./12x4/')
+  os.chdir(options.odir)
   for model in models:
     model_name = model['name']
     if not os.path.exists(model_name):
@@ -318,21 +378,23 @@ def trainCNN(options,args):
     shaped_data                = m.prepInput(normdata)
     val_input, train_input     = split(shaped_data)
     m_autoCNN , m_autoCNNen    = m.get_models()
-    if model['ws']=='':
-      history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name)
+    if model['ws']=='' :
+      history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
 
     Nevents = 8 
-    input_Q            = np.reshape(val_input,(len(val_input),8,8))
-    index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
 
-    cnn_deQ ,cnn_enQ   = m.predict(val_input)
-    corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,name=model_name)
+    input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
+    index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
+    corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
 
     visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
-    index = np.random.choice(np.where(corr_arr>0.9)[0], Nevents, replace=False)  
-    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
-    index = np.random.choice(np.where(corr_arr<0.2)[0], Nevents, replace=False)  
-    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
+    if len(np.where(corr_arr>0.9)[0])>0:
+        index = np.random.choice(np.where(corr_arr>0.9)[0], Nevents, replace=False)  
+        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
+    
+    if len(np.where(corr_arr>0.2)[0])>0:
+        index = np.random.choice(np.where(corr_arr<0.2)[0], Nevents, replace=False)  
+        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
 
     model['corr'] = np.round(np.mean(corr_arr),3)
     model['ssd'] = np.round(np.mean(ssd_arr),3)
@@ -347,13 +409,17 @@ def trainCNN(options,args):
 
     #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
 
+    os.chdir('../')
   print(summary)
 
 
 if __name__== "__main__":
 
     parser = optparse.OptionParser()
-    parser.add_option('-o',"--odir", type="string", default = 'ntuple.root',dest="inputFile", help="input TSG ntuple")
+    parser.add_option('-o',"--odir", type="string", default = 'CNN/',dest="odir", help="input TSG ntuple")
+    parser.add_option('-i',"--inputFile", type="string", default = 'CALQ_output_10x.csv',dest="inputFile", help="input TSG ntuple")
+    parser.add_option("--dryRun", action='store_true', default = False,dest="dryRun", help="dryRun")
+    parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
 
     (options, args) = parser.parse_args()
     #trainDeepAutoEncoder(options,args)
