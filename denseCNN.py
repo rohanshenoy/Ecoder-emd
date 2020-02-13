@@ -144,9 +144,15 @@ class denseCNN:
         decoded_Q = self.autoencoder.predict(x)
         encoded_Q = self.encoder.predict(x)
         s = self.pams['shape'] 
-        decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0],s[1]))
-        encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
-        return decoded_Q, encoded_Q
+        if self.pams['channels_first']:
+            shaped_x  = np.reshape(x,(len(x),s[0]*s[1],s[2]))
+            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0]*s[1],s[2]))
+            encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
+        else:
+            shaped_x  = np.reshape(x,(len(x),s[0],s[1]))
+            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0],s[1]))
+            encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
+        return shaped_x,decoded_Q, encoded_Q
 
     def summary(self):
       self.encoder.summary()
