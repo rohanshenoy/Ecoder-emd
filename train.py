@@ -20,38 +20,6 @@ def normalize(data):
         data[i] = 1.*data[i]/data[i].max()
     return data,np.array(norm)
 
-def prepInput(shape=[],nrows=None,reorder=False):
-  data = pd.read_csv("CALQ_output_10x.csv",nrows=nrows)  ## big  300k file
-  
-  inputdata = normalize(data.values.copy())
-
-  if reorder:
-      newOrder = np.array([
-          28,29,30,31,0,4,8,12,
-          24,25,26,27,1,5,9,13,
-          20,21,22,23,2,6,10,14,
-          16,17,18,19,3,7,11,15,
-          47,43,39,35,35,34,33,32,
-          46,42,38,34,39,38,37,36,
-          45,41,37,33,43,42,41,40,
-          44,40,36,32,47,46,45,44])
-      orderMask = np.array([
-              1,1,1,1,1,1,1,1,
-              1,1,1,1,1,1,1,1,
-              1,1,1,1,1,1,1,1,
-              1,1,1,1,1,1,1,1,
-              1,1,1,1,1,1,1,1,
-              1,1,1,0,0,1,1,1,
-              1,1,0,0,0,0,0,1,
-              1,0,0,0,0,0,0,1,])
-      inputdata = inputdata[:,newOrder]
-      inputdata[:,orderMask==0]=0  #zeros out repeated entries
-
-  if len(shape)>0: 
-    shaped_data = np.reshape(inputdata,(len(inputdata),shape[0],shape[1],shape[2]))
-  else:
-    shaped_data = inputdata
-
 def split(shaped_data, validation_frac=0.2):
   N = round(len(shaped_data)*validation_frac)
   
@@ -111,11 +79,6 @@ def predict(x,autoencoder,encoder,reshape=True):
     encoded_shape = encoded_Q.shape
     encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),encoded_shape[3],encoded_shape[1]))
   return decoded_Q, encoded_Q
-
-### sum of squared difference
-def SSD(x,y):
-    ssd  = np.sum(((x-y)**2),(1,2)) ## sum x-y dim.
-    return ssd
 
 ### cross correlation of input/output 
 def cross_corr(x,y):
@@ -225,94 +188,6 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   plt.savefig('corr_vs_occ_%s.jpg'%name)
 
   return cross_corr_arr,ssd_arr
-
-
-def vis1d(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
-  #Nevents = 50
-  #index = np.random.choice(encoded_Q.shape[0], Nevents, replace=False)  
-  
-  fig, axs = plt.subplots(1, 4, figsize=(16, 5))
-  fig.suptitle(name,fontsize=16)
-  
-  axs[0].set(xlabel='ChargeQ',title='Input layer')
-  axs[1].set(xlabel='Encoded unit',title='Encoded layer')
-  axs[2].set(xlabel='ChargeQ'     ,title='Decoded layer')
-  axs[3].set(xlabel='(Decoded - Input)**2',title='(Decoded - Input)**2')
-  c1=axs[0].imshow(input_Q[index])
-  c2=axs[1].imshow(encoded_Q[index])
-  c3=axs[2].imshow(decoded_Q[index])
-  c4=axs[3].imshow((decoded_Q[index]-input_Q[index])**2)
-  plt.colorbar(c1,ax=axs[0])
-  plt.colorbar(c2,ax=axs[1])
-  plt.colorbar(c3,ax=axs[2])
-  plt.colorbar(c4,ax=axs[3])
-  plt.savefig("%s.jpg"%name)
-  #plt.show()
-
-  def plothist(y,xlabel,name):
-    plt.figure(figsize=(6,4))
-    plt.hist(y,50)
-    
-    mu = np.mean(y)
-    std = np.std(y)
-    ax = plt.axes()
-    plt.text(0.1, 0.9, name,transform=ax.transAxes)
-    plt.text(0.1, 0.8, r'$\mu=%.3f,\ \sigma=%.3f$'%(mu,std),transform=ax.transAxes)
-    plt.xlabel(xlabel)
-    plt.ylabel('Entry')
-    plt.title('%s on validation set'%xlabel)
-    plt.savefig("hist_%s.jpg"%name)
-    #plt.show()
-
-  cross_corr_arr = np.array( [cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
-  ssd_arr        = np.sum((input_Q-decoded_Q)**2,1)
-
-  plothist(cross_corr_arr,'cross correlation',name+"_corr")
-  plothist(ssd_arr,'sum squared difference',name+"_ssd")
-
-  return cross_corr_arr,ssd_arr
-
-def trainDeepAutoEncoder(options,args):
-
-  nrows = 30000
-  Nevents = 50
-  full_input, val_input, train_input = prepInput(reshape=False,nrows=nrows)
-
-  index = np.random.choice(val_input.shape[0], Nevents, replace=False)  
-  models = [
-    {'dims':[48,24,12,6  ]         ,'ws':'./deepAutos_48_24_12_6.hdf5'},
-    {'dims':[48,24,12,6,4]         ,'ws':'./deepAutos_48_24_12_6_4.hdf5'},
-    {'dims':[48,24,12,8,4]         ,'ws':'./deepAutos_48_24_12_8_4.hdf5'},
-    {'dims':[48,24,12,6,3]         ,'ws':'./deepAutos_48_24_12_6_3.hdf5'},
-    {'dims':[48,24,12,6,2]         ,'ws':'./deepAutos_48_24_12_6_2.hdf5'},
-    {'dims':[48,24,12,10,6  ]      ,'ws':'./deepAutos_48_24_12_10_6.hdf5'},
-    {'dims':[48,24,12,10,10,10,6  ],'ws':'./deepAutos_48_24_12_10_10_10_6.hdf5'},
-    {'dims':[48,6,2]               ,'ws':'./deepAutos_48_6_2.hdf5'}     
-  ]
-
-  summary = pd.DataFrame(columns=['name','corr','ssd'])
-  os.chdir('./deepAutos/')
-  for model in models:
-    dims = model['dims']
-    model_name = "deepAutos_"+"_".join([str(d) for d in dims])
-    if not os.path.exists(model_name):
-      os.mkdir(model_name)
-    os.chdir(model_name)
-    m_deepAuto, m_deepAutoEn = deepAuto(dims,model['ws'])
-    #m_deepAuto.summary()
-    #m_deepAutoEn.summary()
-    if model['ws']=='':
-      history = train(m_deepAuto,m_deepAutoEn,train_input,val_input,name=model_name)
-    deQ, enQ = predict(val_input,m_deepAuto,m_deepAutoEn,False)
-    corr_arr, ssd_arr = vis1d(val_input,deQ,enQ,index,model_name)
-    model['corr'] = np.round(np.mean(corr_arr),3)
-    model['ssd'] = np.round(np.mean(ssd_arr),3)
-
-    summary = summary.append({'name':model_name,'corr':model['corr'],'ssd':model['ssd']},ignore_index=True)
-    for k in model.keys():
-      print(k,model[k])
-    os.chdir('../')
-  print(summary)
 
 def trainCNN(options,args):
 
@@ -469,7 +344,6 @@ if __name__== "__main__":
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
 
     (options, args) = parser.parse_args()
-    #trainDeepAutoEncoder(options,args)
     trainCNN(options,args)
 
 
