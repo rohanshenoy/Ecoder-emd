@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from models import *
 
 import numba
+import json
 from denseCNN import denseCNN 
 
 @numba.jit
@@ -70,7 +71,7 @@ def split(shaped_data, validation_frac=0.2):
 
 def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
 
-  es = kr.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=1)
+  es = kr.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=3)
   history = autoencoder.fit(train_input,train_input,
                 epochs=n_epochs,
                 batch_size=500,
@@ -208,6 +209,21 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   plt.xlabel('Charge')
   plt.savefig("hist_Qabs_%s.jpg"%name)
 
+  nonzeroQs = np.count_nonzero(input_Q_abs.reshape(len(input_Q_abs),48),axis=1)
+  occbins = [0,5,10,20,48]
+  fig, axes = plt.subplots(1,len(occbins)-1, figsize=(16, 4))
+  for i,ax in enumerate(axes):
+      selection=np.logical_and(nonzeroQs<occbins[i+1],nonzeroQs>occbins[i])
+      label = '%i<occ<%i'%(occbins[i],occbins[i+1])
+      mu = np.mean(cross_corr_arr[selection])
+      std = np.std(cross_corr_arr[selection])
+      plt.text(0.1, 0.8, r'$\mu=%.3f,\ \sigma=%.3f$'%(mu,std),transform=ax.transAxes)
+      ax.hist(cross_corr_arr[selection],40)
+      ax.set(xlabel='corr',title=label)
+  plt.tight_layout()
+  #plt.show()
+  plt.savefig('corr_vs_occ_%s.jpg'%name)
+
   return cross_corr_arr,ssd_arr
 
 
@@ -342,12 +358,41 @@ def trainCNN(options,args):
     #{'name':'8x8_dim10','ws':'','vis_shape':(8,8),'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':10}},
     #{'name':'8x8_dim8','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':8}},
     #{'name':'8x8_dim4','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':4}},
-    {'name':'4x4_norm','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True }},
     #{'name':'12x4_norm','ws':'','vis_shape':(12,4),'pams':{'shape':(12,4,1),
     #        'CNN_layer_nodes':[8,4,4,2],
     #        'CNN_kernel_size':[3,3,3,3],
     #        'CNN_pool':[False,False,False,False],     
     #}},
+
+    #{'name':'4x4_norm','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True }},
+    #{'name':'4x4_norm_d10','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':10}},
+    #{'name':'4x4_norm_d8','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
+    #{'name':'4x4_norm_v4','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #     'CNN_layer_nodes':[4,4,4],
+    #     'CNN_kernel_size':[3,3,3],
+    #     'CNN_pool':[False,False,False],
+    #}},
+    #{'name':'4x4_norm_v5','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True ,
+    #     'CNN_layer_nodes':[8,4,2],
+    #     'CNN_kernel_size':[3,3,3],
+    #     'CNN_pool':[False,False,False],
+    #}},
+    #{'name':'4x4_norm_v6','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True ,
+    #     'CNN_layer_nodes':[8,4,2],
+    #     'CNN_kernel_size':[5,5,3],
+    #     'CNN_pool':[False,False,False],
+    #}},
+    #{'name':'4x4_norm_v7','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #     'CNN_layer_nodes':[4,4,4],
+    #     'CNN_kernel_size':[5,5,3],
+    #     'CNN_pool':[False,False,False],
+    #}},
+    {'name':'4x4_norm_v8','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+         'CNN_layer_nodes':[8,4,4,4,2],
+         'CNN_kernel_size':[3,3,3,3,3],
+         'CNN_pool':[0,0,0,0,0],
+    }},
+
     #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[8,8],
     #     'CNN_kernel_size':[3,3],
@@ -408,6 +453,8 @@ def trainCNN(options,args):
                               },ignore_index=True)
 
     #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
+    with open(model_name+"_pams.json",'w') as f:
+        f.write(json.dumps(m.get_pams(),indent=4))
 
     os.chdir('../')
   print(summary)
