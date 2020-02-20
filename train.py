@@ -1,4 +1,5 @@
 import keras as kr
+from keras import losses
 import numpy as np
 import tensorflow as tf
 import pandas as pd
@@ -189,6 +190,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
 
   return cross_corr_arr,ssd_arr
 
+
 def trainCNN(options,args):
 
   data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
@@ -239,34 +241,9 @@ def trainCNN(options,args):
     #        'CNN_pool':[False,False,False,False],     
     #}},
 
-    #{'name':'4x4_norm','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True }},
-    #{'name':'4x4_norm_d10','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':10}},
-    #{'name':'4x4_norm_d8','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
-    #{'name':'4x4_norm_v4','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
-    #     'CNN_layer_nodes':[4,4,4],
-    #     'CNN_kernel_size':[3,3,3],
-    #     'CNN_pool':[False,False,False],
-    #}},
-    #{'name':'4x4_norm_v5','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True ,
-    #     'CNN_layer_nodes':[8,4,2],
-    #     'CNN_kernel_size':[3,3,3],
-    #     'CNN_pool':[False,False,False],
-    #}},
-    #{'name':'4x4_norm_v6','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True ,
-    #     'CNN_layer_nodes':[8,4,2],
-    #     'CNN_kernel_size':[5,5,3],
-    #     'CNN_pool':[False,False,False],
-    #}},
-    #{'name':'4x4_norm_v7','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
-    #     'CNN_layer_nodes':[4,4,4],
-    #     'CNN_kernel_size':[5,5,3],
-    #     'CNN_pool':[False,False,False],
-    #}},
-    {'name':'4x4_norm_v8','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
-         'CNN_layer_nodes':[8,4,4,4,2],
-         'CNN_kernel_size':[3,3,3,3,3],
-         'CNN_pool':[0,0,0,0,0],
-    }},
+    #{'name':'4x4_norm'    ,'ws':'4x4_norm.hdf5'    ,'pams':{'shape':(3,4,4) ,'channels_first':True }},
+    #{'name':'4x4_norm_d10','ws':'4x4_norm_d10.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':10}},
+    #{'name':'4x4_norm_d8' ,'ws':'4x4_norm_d8.hdf5' ,'pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
 
     #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[8,8],
@@ -280,6 +257,62 @@ def trainCNN(options,args):
     #     'Dense_layer_nodes':[16],
     #}},
     #{'name':'4x4_v3' ,'ws':'4x4_v3.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,'CNN_kernel_size':[2]}},
+    #{'name':'4x4_norm_v4','ws':'4x4_norm_v4.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #     'CNN_layer_nodes':[4,4,4],
+    #     'CNN_kernel_size':[3,3,3],
+    #     'CNN_pool':[False,False,False],
+    #}},
+    #{'name':'4x4_norm_v5','ws':'4x4_norm_v5.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,
+    #     'CNN_layer_nodes':[8,4,2],
+    #     'CNN_kernel_size':[3,3,3],
+    #     'CNN_pool':[False,False,False],
+    #}},
+    #{'name':'4x4_norm_v6','ws':'4x4_norm_v6.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,
+    #     'CNN_layer_nodes':[8,4,2],
+    #     'CNN_kernel_size':[5,5,3],
+    #     'CNN_pool':[False,False,False],
+    #}},
+    #{'name':'4x4_norm_v7','ws':'4x4_norm_v7.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #     'CNN_layer_nodes':[4,4,4],
+    #     'CNN_kernel_size':[5,5,3],
+    #     'CNN_pool':[False,False,False],
+    #}},
+    {'name':'4x4_norm_v8','ws':'4x4_norm_v8.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True, 
+         'CNN_layer_nodes':[8,4,4,4,2],
+         'CNN_kernel_size':[3,3,3,3,3],
+         'CNN_pool':[0,0,0,0,0],
+    }},
+    #{'name':'4x4_norm_v8_clone10','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #     'CNN_layer_nodes':[8,4,4,4,2],
+    #     'CNN_kernel_size':[3,3,3,3,3],
+    #     'CNN_pool':[0,0,0,0,0],
+    #     'n_copy':10,'occ_low':20,'occ_hi':48,
+    #}},
+    #{'name':'4x4_norm_v8_wmse','ws':'4x4_norm_v8_wmse.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #     'CNN_layer_nodes':[8,4,4,4,2],
+    #     'CNN_kernel_size':[3,3,3,3,3],
+    #     'CNN_pool':[0,0,0,0,0],
+    #     'loss':'weightedMSE'
+    #}},
+    #{'name':'4x4_norm_v8_KL','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #     'CNN_layer_nodes':[8,4,4,4,2],
+    #     'CNN_kernel_size':[3,3,3,3,3],
+    #     'CNN_pool':[0,0,0,0,0],
+    #     'loss':'kullback_leibler_divergence'
+    #}},
+    #{'name':'4x4_norm_v8_skimOcc','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #     'CNN_layer_nodes':[8,4,4,4,2],
+    #     'CNN_kernel_size':[3,3,3,3,3],
+    #     'CNN_pool':[0,0,0,0,0],
+    #     'skimOcc':True,'occ_low':20,'occ_hi':48,
+    #}},
+    #{'name':'4x4_norm_v8_hinge','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #     'CNN_layer_nodes':[8,4,4,4,2],
+    #     'CNN_kernel_size':[3,3,3,3,3],
+    #     'CNN_pool':[0,0,0,0,0],
+    #     'loss':losses.hinge
+    #}},
+
   ]
 
   summary = pd.DataFrame(columns=['name','en_pams','tot_pams','corr','ssd'])
@@ -302,18 +335,25 @@ def trainCNN(options,args):
       history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
 
     Nevents = 8 
+    N_verify = 50
 
     input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
+    ## csv files for RTL verification
+    np.savetxt("verify_input.csv", input_Q[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
+    np.savetxt("verify_output.csv",cnn_enQ[0:N_verify].reshape(N_verify,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
+
     index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
     corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
 
+    hi_corr_index = (np.where(corr_arr>0.9))[0]
+    low_corr_index = (np.where(corr_arr<0.2))[0]
     visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
-    if len(np.where(corr_arr>0.9)[0])>0:
-        index = np.random.choice(np.where(corr_arr>0.9)[0], Nevents, replace=False)  
+    if len(hi_corr_index)>0:
+        index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
         visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
     
-    if len(np.where(corr_arr>0.2)[0])>0:
-        index = np.random.choice(np.where(corr_arr<0.2)[0], Nevents, replace=False)  
+    if len(low_corr_index)>0:
+        index = np.random.choice(low_corr_index,min(Nevents,len(low_corr_index)), replace=False)  
         visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
 
     model['corr'] = np.round(np.mean(corr_arr),3)
