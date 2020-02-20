@@ -17,13 +17,34 @@ class denseCNN:
             'channels_first'   : False,
             'arrange'          : [],
             'arrMask'          : [],
+            'n_copy'           : 0,      # no. of copy for hi occ datasets
+            'loss'             : ''
         }
+
         self.weights_f =weights_f
         
 
     def setpams(self,in_pams):
         for k,v in in_pams.items():
             self.pams[k] = v
+
+    def shuffle(self,arr):
+        order = np.arange(48)
+        np.random.shuffle(order)
+        return arr[:,order]
+    
+    def cloneInput(self,input_q,n_copy,occ_low,occ_hi):
+        shape = self.pams['shape']
+        nonzeroQs = np.count_nonzero(input_q.reshape(len(input_q),48),axis=1)
+        selection = np.logical_and(nonzeroQs<=occ_hi,nonzeroQs>occ_low)
+        occ_q     = input_q[selection]
+        occ_q_flat= occ_q.reshape(len(occ_q),48)
+        self.pams['cloned_fraction'] = len(occ_q)/len(input_q)
+        for i in range(0,n_copy):
+            clone   = self.shuffle(occ_q_flat)
+            clone   = clone.reshape(len(clone),shape[0],shape[1],shape[2])
+            input_q = np.concatenate([input_q,clone])
+        return input_q
             
     def prepInput(self,normData):
       shape = self.pams['shape']
@@ -36,10 +57,28 @@ class denseCNN:
       if len(self.pams['arrMask'])>0:
           arrMask = self.pams['arrMask']
           inputdata[:,arrMask==0]=0  #zeros out repeated entries
-
+      
       shaped_data = inputdata.reshape(len(inputdata),shape[0],shape[1],shape[2])
 
+      if self.pams['n_copy']>0:
+        n_copy  = self.pams['n_copy']
+        occ_low = self.pams['occ_low']
+        occ_hi = self.pams['occ_hi']
+        shaped_data = self.cloneInput(shaped_data,n_copy,occ_low,occ_hi)
+      #if self.pams['skimOcc']:
+      #  occ_low = self.pams['occ_low']
+      #  occ_hi = self.pams['occ_hi']
+      #  nonzeroQs = np.count_nonzero(shaped_data.reshape(len(shaped_data),48),axis=1)
+      #  selection = np.logical_and(nonzeroQs<=occ_hi,nonzeroQs>occ_low)
+      #  shaped_data     = shaped_data[selection]
+
+
       return shaped_data
+
+    def weightedMSE(self, y_true, y_pred):
+        y_true = K.cast(y_true, y_pred.dtype)
+        loss   = K.mean(K.square(y_true - y_pred)*K.maximum(y_pred,y_true),axis=(-1))
+        return loss
             
     def init(self,printSummary=True):
         encoded_dim = self.pams['encoded_dim']
@@ -117,8 +156,15 @@ class denseCNN:
         if printSummary:
           self.autoencoder.summary()
 
-        self.autoencoder.compile(loss='mse', optimizer='adam')
-        self.encoder.compile(loss='mse', optimizer='adam')
+        if self.pams['loss']=="weightedMSE":
+            self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
+            self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
+        elif self.pams['loss']!='':
+            self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
+            self.encoder.compile(loss=self.pams['loss'], optimizer='adam')
+        else:
+            self.autoencoder.compile(loss='mse', optimizer='adam')
+            self.encoder.compile(loss='mse', optimizer='adam')
 
         CNN_layers=''
         if len(CNN_layer_nodes)>0:
