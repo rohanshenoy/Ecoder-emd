@@ -58,17 +58,27 @@ def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
   plt.savefig("history_%s.jpg"%name)
   #plt.show()
 
-  
+  save_models(autoencoder,name)
+
+  return history
+
+def save_models(autoencoder, name):
   json_string = autoencoder.to_json()
   with open('./%s.json'%name,'w') as f:
       f.write(json_string)
+  encoder = autoencoder.get_layer("encoder")
   json_string = encoder.to_json()
   with open('./%s.json'%("encoder_"+name),'w') as f:
       f.write(json_string)
+  decoder = autoencoder.get_layer("decoder")
+  json_string = decoder.to_json()
+  with open('./%s.json'%("decoder_"+name),'w') as f:
+      f.write(json_string)
   autoencoder.save_weights('%s.hdf5'%name)
   encoder.save_weights('%s.hdf5'%("encoder_"+name))
-
-  return history
+  decoder.save_weights('%s.hdf5'%("decoder_"+name))
+  return
+  
 
 def predict(x,autoencoder,encoder,reshape=True):
   decoded_Q = autoencoder.predict(x)
@@ -333,6 +343,8 @@ def trainCNN(options,args):
     m_autoCNN , m_autoCNNen    = m.get_models()
     if model['ws']=='' :
       history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
+    else:
+      save_models(m_autoCNN,model_name)
 
     Nevents = 8 
     N_verify = 50
@@ -341,6 +353,7 @@ def trainCNN(options,args):
     ## csv files for RTL verification
     np.savetxt("verify_input.csv", input_Q[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
     np.savetxt("verify_output.csv",cnn_enQ[0:N_verify].reshape(N_verify,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
+    np.savetxt("verify_decoded.csv",cnn_deQ[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
 
     index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
     corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
