@@ -198,7 +198,11 @@ def trainCNN(options,args):
   print(device_lib.list_local_devices())
   print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
   print("Is GPU available? ", tf.test.is_gpu_available())
-  
+
+  # from keras import backend
+  # backend.set_image_data_format('channels_first')
+
+
   data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
   normdata,maxdata = normalize(data.values.copy())
 
@@ -211,6 +215,7 @@ def trainCNN(options,args):
               46,42,38,34,39,38,37,36,
               45,41,37,33,43,42,41,40,
               44,40,36,32,47,46,45,44])
+  
   arrMask  =  np.array([
               1,1,1,1,1,1,1,1,
               1,1,1,1,1,1,1,1,
@@ -220,6 +225,23 @@ def trainCNN(options,args):
               1,1,1,0,0,1,1,1,
               1,1,0,0,0,0,0,1,
               1,0,0,0,0,0,0,1,])
+
+  arrange443 = np.array([0,16, 32,
+                         1,17, 33,
+                         2,18, 34,
+                         3,19, 35,
+                         4,20, 36,
+                         5,21, 37,
+                         6,22, 38,
+                         7,23, 39,
+                         8,24, 40,
+                         9,25, 41,
+                        10,26, 42,
+                        11,27, 43,
+                        12,28, 44,
+                        13,29, 45,
+                        14,30, 46,
+                        15,31, 47])
 
   models = [
     #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },
@@ -283,7 +305,7 @@ def trainCNN(options,args):
     #     'CNN_kernel_size':[5,5,3],
     #     'CNN_pool':[False,False,False],
     #}},
-    {'name':'4x4_norm_v8','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    {'name':'4x4_norm_v8','ws':'','pams':{'shape':(4,4,3) ,'channels_first':False,'arrange':arrange443,
          'CNN_layer_nodes':[8,4,4,4,2],
          'CNN_kernel_size':[3,3,3,3,3],
          'CNN_pool':[0,0,0,0,0],

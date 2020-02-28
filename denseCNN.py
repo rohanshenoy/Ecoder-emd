@@ -129,11 +129,13 @@ class denseCNN:
         x = Reshape((shape[1], shape[2], shape[3]))(x)
 
         for i,n_nodes in enumerate(CNN_layer_nodes):
+            
             if CNN_pool[i]:
               if channels_first:
                   x = UpSampling2D((2, 2),data_format='channels_first')(x)
               else:
                   x = UpSampling2D((2, 2))(x)
+            
             if channels_first:
               x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',data_format='channels_first')(x)
             else:
@@ -143,7 +145,8 @@ class denseCNN:
           #shape[0] will be # of channel
           x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=3,padding='same',data_format='channels_first')(x)
         else:
-          x = Conv2DTranspose(filters=1,kernel_size=3,padding='same')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=3,padding='same')(x)
+          # x = Conv2DTranspose(filters=1,kernel_size=3,padding='same')(x)
 
         outputs = Activation('sigmoid', name='decoder_output')(x)
 
