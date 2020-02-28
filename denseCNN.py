@@ -198,8 +198,8 @@ class denseCNN:
             decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0]*s[1],s[2]))
             encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
         else:
-            shaped_x  = np.reshape(x,(len(x),s[0],s[1]))
-            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0],s[1]))
+            shaped_x  = np.reshape(x,(len(x),s[2]*s[1],s[0]))
+            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[2]*s[1],s[0]))
             encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
         return shaped_x,decoded_Q, encoded_Q
 
