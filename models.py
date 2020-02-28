@@ -2,7 +2,7 @@ from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D
 from keras.models import Model
 from keras import backend as K
 import keras as kr
-import qkeras.qkeras as qkr
+import qkeras as qkr
 
 
 def autoCNN(N_filters=[16,8,4],conv_filter=(3,3),pool_filter=(2,2),shape=(12,4,1),weights_f=''):
