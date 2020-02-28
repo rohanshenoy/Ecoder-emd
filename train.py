@@ -360,9 +360,8 @@ def trainCNN(options,args):
     val_input, train_input     = split(shaped_data)
     m_autoCNN , m_autoCNNen    = m.get_models()
     
-    with tf.device('/gpu:0'):
-      if model['ws']=='':
-        history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
+    if model['ws']=='':
+      history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
 
   #   Nevents = 8 
   #   N_verify = 50
