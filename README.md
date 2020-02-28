@@ -1,6 +1,34 @@
 # Ecoder
 ECON-T autoencoder model
 
+## Setup 
+
+### On VM `klijnsma-gpu3`
+
+Get data and untar
+```
+mkdir data; cd data
+wget https://www.dropbox.com/s/502o1h5y0ukkasf/ecoder.tar.gz 
+tar -xvzf ecoder.tar.gz
+mv uscms/home/kkwok/eos/ecoder/* .
+```
+
+Setup environment using miniconda3
+```
+source install_miniconda3.sh #if your first time
+source setup.sh #also if your first time
+conda activate ecoder-env
+pip install keras tensorflow numba numpy pandas matplotlib tensorflow_model_optimization
+```
+Setup qkeras (h/t Thea!):
+```
+git clone https://github.com/google/qkeras.git
+cd qkeras
+python setup.py build
+python setup.py install --user
+cd ..
+```
+
 ## Juypter notebook demos
 Following files illustrates prototypes of different autoencoder architectures
 

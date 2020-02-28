@@ -4,6 +4,7 @@ import numpy as np
 import tensorflow as tf
 import pandas as pd
 import optparse
+from tensorflow.python.client import device_lib
 
 import os
 import matplotlib.pyplot as plt
@@ -193,6 +194,11 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
 
 def trainCNN(options,args):
 
+  # List devices:
+  print(device_lib.list_local_devices())
+  print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
+  print("Is GPU available? ", tf.test.is_gpu_available())
+  
   data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
   normdata,maxdata = normalize(data.values.copy())
 
@@ -277,7 +283,7 @@ def trainCNN(options,args):
     #     'CNN_kernel_size':[5,5,3],
     #     'CNN_pool':[False,False,False],
     #}},
-    {'name':'4x4_norm_v8','ws':'4x4_norm_v8.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    {'name':'4x4_norm_v8','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
          'CNN_layer_nodes':[8,4,4,4,2],
          'CNN_kernel_size':[3,3,3,3,3],
          'CNN_pool':[0,0,0,0,0],
@@ -331,48 +337,50 @@ def trainCNN(options,args):
     shaped_data                = m.prepInput(normdata)
     val_input, train_input     = split(shaped_data)
     m_autoCNN , m_autoCNNen    = m.get_models()
-    if model['ws']=='' :
-      history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
-
-    Nevents = 8 
-    N_verify = 50
-
-    input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
-    ## csv files for RTL verification
-    np.savetxt("verify_input.csv", input_Q[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
-    np.savetxt("verify_output.csv",cnn_enQ[0:N_verify].reshape(N_verify,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
-
-    index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
-    corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
-
-    hi_corr_index = (np.where(corr_arr>0.9))[0]
-    low_corr_index = (np.where(corr_arr<0.2))[0]
-    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
-    if len(hi_corr_index)>0:
-        index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
-        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
     
-    if len(low_corr_index)>0:
-        index = np.random.choice(low_corr_index,min(Nevents,len(low_corr_index)), replace=False)  
-        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
+    with tf.device('/gpu:0'):
+      if model['ws']=='':
+        history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
 
-    model['corr'] = np.round(np.mean(corr_arr),3)
-    model['ssd'] = np.round(np.mean(ssd_arr),3)
+  #   Nevents = 8 
+  #   N_verify = 50
 
-    summary = summary.append({'name':model_name,
-                              'corr':model['corr'],
-                              'ssd':model['ssd'],
-                              'en_pams' : m_autoCNNen.count_params(),
-                              'tot_pams': m_autoCNN.count_params(),
-                              'ssd':model['ssd'],
-                              },ignore_index=True)
+  #   input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
+  #   ## csv files for RTL verification
+  #   np.savetxt("verify_input.csv", input_Q[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
+  #   np.savetxt("verify_output.csv",cnn_enQ[0:N_verify].reshape(N_verify,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
 
-    #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
-    with open(model_name+"_pams.json",'w') as f:
-        f.write(json.dumps(m.get_pams(),indent=4))
+  #   index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
+  #   corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
 
-    os.chdir('../')
-  print(summary)
+  #   hi_corr_index = (np.where(corr_arr>0.9))[0]
+  #   low_corr_index = (np.where(corr_arr<0.2))[0]
+  #   visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
+  #   if len(hi_corr_index)>0:
+  #       index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
+  #       visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
+    
+  #   if len(low_corr_index)>0:
+  #       index = np.random.choice(low_corr_index,min(Nevents,len(low_corr_index)), replace=False)  
+  #       visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
+
+  #   model['corr'] = np.round(np.mean(corr_arr),3)
+  #   model['ssd'] = np.round(np.mean(ssd_arr),3)
+
+  #   summary = summary.append({'name':model_name,
+  #                             'corr':model['corr'],
+  #                             'ssd':model['ssd'],
+  #                             'en_pams' : m_autoCNNen.count_params(),
+  #                             'tot_pams': m_autoCNN.count_params(),
+  #                             'ssd':model['ssd'],
+  #                             },ignore_index=True)
+
+  #   #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
+  #   with open(model_name+"_pams.json",'w') as f:
+  #       f.write(json.dumps(m.get_pams(),indent=4))
+
+  #   os.chdir('../')
+  # print(summary)
 
 
 if __name__== "__main__":
