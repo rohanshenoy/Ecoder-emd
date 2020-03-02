@@ -63,4 +63,7 @@ Scripts to explore hyperparameters choices:
 python train.py -i ~/eos/ecoder/pgun_pid1_pt200_200PU.csv  -o ./qjet_200PU/  --epoch 1
 ## train the weights with max 150 epoch 
 python train.py -i ~/eos/ecoder/pgun_pid1_pt200_200PU.csv  -o ./qjet_200PU/  --epoch 150
+
+## After producing a `.hdf5` file from trainning, you can re-run the model skipping the trainning phase.
+## Do so by simply setting the model parameter 'ws' to `modelname.hdf5`
 ```
