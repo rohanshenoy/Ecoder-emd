@@ -28,6 +28,12 @@ python setup.py build
 python setup.py install --user
 cd ..
 ```
+### Setup on LPC 
+If you are working on the LPC cluster working node, use the following scripts to setup the environment
+```
+source LPC_envSetup.sh      ##do this for the first time
+source lpc_env.sh           ##do this everytime
+```
 
 ## Juypter notebook demos
 Following files illustrates prototypes of different autoencoder architectures
