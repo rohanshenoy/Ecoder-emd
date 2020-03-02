@@ -129,11 +129,13 @@ class denseCNN:
         x = Reshape((shape[1], shape[2], shape[3]))(x)
 
         for i,n_nodes in enumerate(CNN_layer_nodes):
+            
             if CNN_pool[i]:
               if channels_first:
                   x = UpSampling2D((2, 2),data_format='channels_first')(x)
               else:
                   x = UpSampling2D((2, 2))(x)
+            
             if channels_first:
               x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',data_format='channels_first')(x)
             else:
@@ -143,7 +145,8 @@ class denseCNN:
           #shape[0] will be # of channel
           x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=3,padding='same',data_format='channels_first')(x)
         else:
-          x = Conv2DTranspose(filters=1,kernel_size=3,padding='same')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=3,padding='same')(x)
+          # x = Conv2DTranspose(filters=1,kernel_size=3,padding='same')(x)
 
         outputs = Activation('sigmoid', name='decoder_output')(x)
 
@@ -195,8 +198,8 @@ class denseCNN:
             decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0]*s[1],s[2]))
             encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
         else:
-            shaped_x  = np.reshape(x,(len(x),s[0],s[1]))
-            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0],s[1]))
+            shaped_x  = np.reshape(x,(len(x),s[2]*s[1],s[0]))
+            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[2]*s[1],s[0]))
             encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
         return shaped_x,decoded_Q, encoded_Q
 
