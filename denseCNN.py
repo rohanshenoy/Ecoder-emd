@@ -143,10 +143,9 @@ class denseCNN:
 
         if channels_first:
           #shape[0] will be # of channel
-          x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=3,padding='same',data_format='channels_first')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=CNN_kernel_size,padding='same',data_format='channels_first')(x)
         else:
-          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=3,padding='same')(x)
-          # x = Conv2DTranspose(filters=1,kernel_size=3,padding='same')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=CNN_kernel_size,padding='same')(x)
 
         outputs = Activation('sigmoid', name='decoder_output')(x)
 
