@@ -12,7 +12,8 @@ from models import *
 
 import numba
 import json
-from denseCNN import denseCNN 
+from denseCNN import denseCNN
+from qDenseCNN import qDenseCNN
 
 @numba.jit
 def normalize(data):
@@ -209,8 +210,11 @@ def trainCNN(options,args):
   print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
   print("Is GPU available? ", tf.test.is_gpu_available())
 
+  qBitStr = "(bits="+str(options.qBits)+",integer="+str(options.qIntBits)+",keep_negative=1)"
+
   # from keras import backend
   # backend.set_image_data_format('channels_first')
+
 
 
   data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
@@ -280,7 +284,8 @@ def trainCNN(options,args):
     #}},
 
     #{'name':'4x4_norm'    ,'ws':'4x4_norm.hdf5'    ,'pams':{'shape':(3,4,4) ,'channels_first':True }},
-    #{'name':'4x4_norm_d10','ws':'4x4_norm_d10.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':10}},
+    {'name':'4x4_norm_d10','ws':'4x4_norm_d10.hdf5','pams':{'shape':(3,4,4) ,'channels_first':False ,
+                                                            'encoded_dim':10, 'qbits':qBitStr}},
     #{'name':'4x4_norm_d8' ,'ws':'4x4_norm_d8.hdf5' ,'pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
 
     #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
@@ -315,11 +320,11 @@ def trainCNN(options,args):
     #     'CNN_kernel_size':[5,5,3],
     #     'CNN_pool':[False,False,False],
     #}},
-    {'name':'4x4_norm_v8','ws':'','pams':{'shape':(4,4,3) ,'channels_first':False,'arrange':arrange443,
-         'CNN_layer_nodes':[8,4,4,4,2],
-         'CNN_kernel_size':[3,3,3,3,3],
-         'CNN_pool':[0,0,0,0,0],
-    }},
+    #{'name':'4x4_norm_v8','ws':'','pams':{'shape':(4,4,3) ,'channels_first':False,'arrange':arrange443,
+    #     'CNN_layer_nodes':[8,4,4,4,2],
+    #     'CNN_kernel_size':[3,3,3,3,3],
+    #     'CNN_pool':[0,0,0,0,0],
+    #}},
     #{'name':'4x4_norm_v8_clone10','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
     #     'CNN_layer_nodes':[8,4,4,4,2],
     #     'CNN_kernel_size':[3,3,3,3,3],
@@ -363,7 +368,7 @@ def trainCNN(options,args):
       os.mkdir(model_name)
     os.chdir(model_name)
    
-    m = denseCNN(weights_f=model['ws']) 
+    m = qDenseCNN(weights_f=model['ws'])
     m.setpams(model['pams'])
     m.init()
     shaped_data                = m.prepInput(normdata)
@@ -424,7 +429,8 @@ if __name__== "__main__":
     parser.add_option('-i',"--inputFile", type="string", default = 'CALQ_output_10x.csv',dest="inputFile", help="input TSG ntuple")
     parser.add_option("--dryRun", action='store_true', default = False,dest="dryRun", help="dryRun")
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
-
+    parser.add_option("--qBits", type='int', default = 8, dest="qBits", help="# of bits of precision for the quantized weights of the model, must also speicfy qIntBits")
+    parser.add_option("--qIntBits", type='int', default = 0, dest="qIntBits", help="# of bits of precision for the integer portion of the quantized weights during quantization")
     (options, args) = parser.parse_args()
     trainCNN(options,args)
 
