@@ -57,7 +57,7 @@ def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
   plt.ylabel('Loss')
   plt.xlabel('Epoch')
   plt.legend(['Train', 'Test'], loc='upper right')
-  plt.savefig("history_%s.jpg"%name)
+  plt.savefig("history_%s.png"%name)
   #plt.show()
 
   save_models(autoencoder,name)
@@ -96,7 +96,7 @@ def predict(x,autoencoder,encoder,reshape=True):
 ### cross correlation of input/output 
 def cross_corr(x,y):
     cov = np.cov(x.flatten(),y.flatten())
-    std = np.sqrt(np.diag(cov))
+    std = np.sqrt(np.diag(cov)+(1e-10 * np.ones_like(cov)))
     corr = cov / np.multiply.outer(std, std)
     return corr[0,1]
 
@@ -143,7 +143,7 @@ def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
     plt.colorbar(c1,ax=axs[2,i])
   
   plt.tight_layout()
-  plt.savefig("%s_examples.jpg"%name)
+  plt.savefig("%s_examples.png"%name)
  
 def visMetric(input_Q,decoded_Q,maxQ,name): 
   #plt.show()
@@ -159,7 +159,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
     plt.xlabel(xlabel)
     plt.ylabel('Entry')
     plt.title('%s on validation set'%xlabel)
-    plt.savefig("hist_%s.jpg"%name)
+    plt.savefig("hist_%s.png"%name)
 
 
   cross_corr_arr = np.array( [cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
@@ -173,7 +173,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   plt.yscale('log')
   plt.legend(loc='upper right')
   plt.xlabel('Charge fraction')
-  plt.savefig("hist_Qfr_%s.jpg"%name)
+  plt.savefig("hist_Qfr_%s.png"%name)
 
   input_Q_abs   = np.array([input_Q[i] * maxQ[i] for i in range(0,len(input_Q))])
   decoded_Q_abs = np.array([decoded_Q[i]*maxQ[i] for i in range(0,len(decoded_Q))])
@@ -183,7 +183,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   plt.yscale('log')
   plt.legend(loc='upper right')
   plt.xlabel('Charge')
-  plt.savefig("hist_Qabs_%s.jpg"%name)
+  plt.savefig("hist_Qabs_%s.png"%name)
 
   nonzeroQs = np.count_nonzero(input_Q_abs.reshape(len(input_Q_abs),48),axis=1)
   occbins = [0,5,10,20,48]
@@ -198,7 +198,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
       ax.set(xlabel='corr',title=label)
   plt.tight_layout()
   #plt.show()
-  plt.savefig('corr_vs_occ_%s.jpg'%name)
+  plt.savefig('corr_vs_occ_%s.png'%name)
 
   return cross_corr_arr,ssd_arr
 
@@ -284,8 +284,11 @@ def trainCNN(options,args):
     #}},
 
     #{'name':'4x4_norm'    ,'ws':'4x4_norm.hdf5'    ,'pams':{'shape':(3,4,4) ,'channels_first':True }},
-    {'name':'4x4_norm_d10','ws':'4x4_norm_d10.hdf5','pams':{'shape':(3,4,4) ,'channels_first':False ,
-                                                            'encoded_dim':10, 'qbits':qBitStr}},
+    #{'name':'4x4_norm_d10','ws':'4x4_norm_d10.hdf5','pams':{'shape':(3,4,4) ,'channels_first':False ,
+     #                                                       'encoded_dim':10, 'qbits':qBitStr}},
+    {'name': '4x4_norm_d10', 'ws': '',
+       'pams': {'shape': (4, 4, 3), 'channels_first': False, 'arrange': arrange443, 'encoded_dim': 10,
+                'loss': 'weightedMSE', 'qbits':qBitStr}},
     #{'name':'4x4_norm_d8' ,'ws':'4x4_norm_d8.hdf5' ,'pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
 
     #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
@@ -373,7 +376,7 @@ def trainCNN(options,args):
     m.init()
     shaped_data                = m.prepInput(normdata)
     val_input, train_input     = split(shaped_data)
-    m_autoCNN , m_autoCNNen    = m.get_models()
+    m_autoCNN , m_autoCNNen    = m.get_q_models()
     
     if model['ws']=='':
       history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
