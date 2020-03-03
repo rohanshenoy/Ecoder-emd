@@ -129,11 +129,11 @@ class qDenseCNN:
         en_qdict.update({"encoded_vector": qbits})
 
         # Instantiate Encoder Model
-        encoder = Model(inputs, encodedLayer, name='encoder')
-        self.encoder, _ = qkr.model_quantize(encoder,en_qdict,activation_bits)
-        print(encoder)
+        self.encoder = Model(inputs, encodedLayer, name='encoder')
+        self.qencoder, _ = qkr.model_quantize(self.encoder,en_qdict,activation_bits)
         if printSummary:
             self.encoder.summary()
+            self.qencoder.summary()
 
         encoded_inputs = Input(shape=(encoded_dim,), name='decoder_input')
         x = encoded_inputs
@@ -141,12 +141,10 @@ class qDenseCNN:
         # decoder dense nodes
         for i, n_nodes in enumerate(Dense_layer_nodes):
             x = Dense(n_nodes, activation='relu', name="de_dense_"+str(i))(x)
-            de_qdict.update({"de_dense_" + str(i): qbits})
 
         x = Dense(shape[1] * shape[2] * shape[3], activation='relu', name='de_dense_final')(x)
-        de_qdict.update({"de_dense_final": qbits})
         x = Reshape((shape[1], shape[2], shape[3]),name="de_reshape")(x)
-        de_qdict.update({"de_reshape": qbits})
+
         for i, n_nodes in enumerate(CNN_layer_nodes):
 
             if CNN_pool[i]:
@@ -154,7 +152,6 @@ class qDenseCNN:
                     x = UpSampling2D((2, 2), data_format='channels_first', name="up_"+str(i))(x)
                 else:
                     x = UpSampling2D((2, 2), name="up_"+str(i))(x)
-                de_qdict.update({"up_"+str(i): qbits})
 
             if channels_first:
                 x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',
@@ -162,41 +159,47 @@ class qDenseCNN:
             else:
                 x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',
                                     name="conv2D_t_"+str(i))(x)
-            de_qdict.update({"conv2D_t_"+str(i): qbits})
 
         if channels_first:
             # shape[0] will be # of channel
-            x = Conv2DTranspose(filters=self.pams['shape'][0], kernel_size=CNN_kernel_size, padding='same',
+            x = Conv2DTranspose(filters=self.pams['shape'][0], kernel_size=CNN_kernel_size[0], padding='same',
                                 data_format='channels_first', name="conv2d_t_final")(x)
 
         else:
-            x = Conv2DTranspose(filters=self.pams['shape'][2], kernel_size=CNN_kernel_size, padding='same',
+            x = Conv2DTranspose(filters=self.pams['shape'][2], kernel_size=CNN_kernel_size[0], padding='same',
                                 name="conv2d_t_final")(x)
-        de_qdict.update({"conv2d_t_final": qbits})
 
         outputs = Activation('sigmoid', name='decoder_output')(x)
-        de_qdict.update({'decoder_output':qbits})
 
-        decoder = Model(encoded_inputs, outputs, name='decoder')
-        self.decoder, _ = qkr.model_quantize(decoder, de_qdict, activation_bits)
+        self.decoder = Model(encoded_inputs, outputs, name='decoder')
         if printSummary:
             self.decoder.summary()
 
-        autoencoder = Model(inputs, self.decoder(self.encoder(inputs)), name='autoencoder')
-        auto_dict = en_qdict + de_qdict
-        self.autoencoder, _ = qkr.model_quantize(autoencoder, auto_dict, activation_bits)
+        self.autoencoder = Model(inputs, self.decoder(self.encoder(inputs)), name='autoencoder')
+        auto_dict = en_qdict
+        self.qautoencoder, _ = qkr.model_quantize(self.autoencoder, auto_dict, activation_bits)
         if printSummary:
             self.autoencoder.summary()
+            self.qautoencoder.summary()
 
         if self.pams['loss'] == "weightedMSE":
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
+            #quantized models
+            self.qautoencoder.compile(loss=self.weightedMSE, optimizer='adam')
+            self.qencoder.compile(loss=self.weightedMSE, optimizer='adam')
         elif self.pams['loss'] != '':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')
+            #quantized models
+            self.qautoencoder.compile(loss=self.pams['loss'], optimizer='adam')
+            self.qencoder.compile(loss=self.pams['loss'], optimizer='adam')
         else:
             self.autoencoder.compile(loss='mse', optimizer='adam')
             self.encoder.compile(loss='mse', optimizer='adam')
+            #quantized models
+            self.qautoencoder.compile(loss='mse', optimizer='adam')
+            self.qencoder.compile(loss='mse', optimizer='adam')
 
         CNN_layers = ''
         if len(CNN_layer_nodes) > 0:
@@ -218,6 +221,8 @@ class qDenseCNN:
 
     def get_models(self):
         return self.autoencoder, self.encoder
+    def get_q_models(self):
+        return self.qautoencoder, self.qencoder
 
     def predict(self, x):
         decoded_Q = self.autoencoder.predict(x)
