@@ -96,7 +96,7 @@ class qDenseCNN:
             "kernel_quantizer": "quantized_bits" + qbits_param,
             "bias_quantizer": "quantized_bits" + qbits_param
         }
-        activation_bits = 9 # TODO actually grab this from params at the very least, is placeholder now
+        activation_bits =  self.pams['act_bits']
         en_qdict = {}
         de_qdict = {}
         x = inputs

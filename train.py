@@ -211,6 +211,7 @@ def trainCNN(options,args):
   print("Is GPU available? ", tf.test.is_gpu_available())
 
   qBitStr = "(bits="+str(options.qBits)+",integer="+str(options.qIntBits)+",keep_negative=1)"
+  act_bits = options.qBits #currently the quantized bits for activation functions are just being set equal to total quantized bits, investigate if it shouldn't be?
 
   # from keras import backend
   # backend.set_image_data_format('channels_first')
@@ -288,7 +289,7 @@ def trainCNN(options,args):
      #                                                       'encoded_dim':10, 'qbits':qBitStr}},
     {'name': '4x4_norm_d10', 'ws': '',
        'pams': {'shape': (4, 4, 3), 'channels_first': False, 'arrange': arrange443, 'encoded_dim': 10,
-                'loss': 'weightedMSE', 'qbits':qBitStr}},
+                'loss': 'weightedMSE', 'qbits':qBitStr, 'act_bits':act_bits}},
     #{'name':'4x4_norm_d8' ,'ws':'4x4_norm_d8.hdf5' ,'pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
 
     #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
