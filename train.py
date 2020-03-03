@@ -387,7 +387,7 @@ def trainCNN(options,args):
     Nevents = 8 
     N_verify = 50
 
-    input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
+    input_Q,cnn_deQ ,cnn_enQ   = m.q_predict(val_input)
     ## csv files for RTL verification
     np.savetxt("verify_input.csv", input_Q[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
     np.savetxt("verify_output.csv",cnn_enQ[0:N_verify].reshape(N_verify,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')

@@ -238,10 +238,29 @@ class qDenseCNN:
             encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
         return shaped_x, decoded_Q, encoded_Q
 
+    def q_predict(self, x):
+        decoded_Q = self.qautoencoder.predict(x)
+        encoded_Q = self.qencoder.predict(x)
+        s = self.pams['shape']
+        if self.pams['channels_first']:
+            shaped_x = np.reshape(x, (len(x), s[0] * s[1], s[2]))
+            decoded_Q = np.reshape(decoded_Q, (len(decoded_Q), s[0] * s[1], s[2]))
+            encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
+        else:
+            shaped_x = np.reshape(x, (len(x), s[2] * s[1], s[0]))
+            decoded_Q = np.reshape(decoded_Q, (len(decoded_Q), s[2] * s[1], s[0]))
+            encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
+        return shaped_x, decoded_Q, encoded_Q
+
     def summary(self):
         self.encoder.summary()
         self.decoder.summary()
         self.autoencoder.summary()
+
+    def q_summary(self):
+        self.qencoder.summary()
+        self.decoder.summary()
+        self.qautoencoder.summary()
 
     ##get pams for writing json
     def get_pams(self):
