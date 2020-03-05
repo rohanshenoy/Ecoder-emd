@@ -1,8 +1,11 @@
-from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation
-from keras.models import Model
-from keras import backend as K
+import tensorflow as tf
+import tensorflow.keras as kr
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation
+from tensorflow.keras.models import Model
+from tensorflow.keras import backend as K
 import qkeras as qkr
-from qkeras.qlayers import QConv2D,QActivation,QDense
+from qkeras import QDense, QConv2D, QActivation
+#from qkeras.qlayers import QConv2D,QActivation,QDense
 import numpy as np
 import json
 
@@ -91,11 +94,12 @@ class qDenseCNN:
         channels_first = self.pams['channels_first']
 
         inputs = Input(shape=self.pams['shape'])  # adapt this if using `channels_first` image data format
-        qbits_param = self.pams['qbits'] #quantized bits string, (bits=n,integer=m,keep_negitive=1), weights should *always* be signed
-        qbits = {
-            "kernel_quantizer": "quantized_bits" + qbits_param,
-            "bias_quantizer": "quantized_bits" + qbits_param
-        }
+        qbits = self.pams['qbits'] #quantized bits string, (bits=n,integer=m,keep_negitive=1), weights should *always* be signed
+        qbits_param = qkr.quantized_bits(bits=qbits['bits'],integer=qbits['integer'],keep_negative=1)
+        #qbits = {
+        #    "kernel_quantizer": "quantized_bits" + qbits_param,
+        #    "bias_quantizer": "quantized_bits" + qbits_param
+        #}
         activation_bits =  self.pams['act_bits']
         en_qdict = {}
         de_qdict = {}
@@ -103,34 +107,39 @@ class qDenseCNN:
 
         for i, n_nodes in enumerate(CNN_layer_nodes):
             if channels_first:
-                x = Conv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',
-                           data_format='channels_first', name="conv2d_"+str(i)+"_m")(x)
+                x = QConv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',
+                           data_format='channels_first', name="conv2d_"+str(i)+"_m",
+                           kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
             else:
-                x = Conv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same', name="conv2d_"+str(i)+"_m")(x)
-            en_qdict.update({"conv2d_"+str(i)+"_m":qbits})
+                x = QConv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same', name="conv2d_"+str(i)+"_m",
+                           kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
+            ###en_qdict.update({"conv2d_"+str(i)+"_m":qbits})
             if CNN_pool[i]:
                 if channels_first:
                     x = MaxPooling2D((2, 2), padding='same', data_format='channels_first', name="mp_"+str(i))(x)
                 else:
                     x = MaxPooling2D((2, 2), padding='same', name="mp_"+str(i))(x)
-                en_qdict.update({"mp_" + str(i): qbits})
+                #en_qdict.update({"mp_" + str(i): qbits})
 
         shape = K.int_shape(x)
 
         x = Flatten(name="flatten")(x)
-        en_qdict.update({"flatten": qbits})
+        #en_qdict.update({"flatten": qbits})
 
         # encoder dense nodes
         for i, n_nodes in enumerate(Dense_layer_nodes):
-            x = Dense(n_nodes, activation='relu', name="en_dense_"+str(i))(x)
-            en_qdict.update({"en_dense_" + str(i): qbits})
+            x = QDense(n_nodes, activation='relu', name="en_dense_"+str(i),
+                           kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
+            #en_qdict.update({"en_dense_" + str(i): qbits})
 
-        encodedLayer = Dense(encoded_dim, activation='relu', name='encoded_vector')(x)
-        en_qdict.update({"encoded_vector": qbits})
+        encodedLayer = QDense(encoded_dim, activation='relu', name='encoded_vector',
+                           kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
+        #en_qdict.update({"encoded_vector": qbits})
 
         # Instantiate Encoder Model
         self.encoder = Model(inputs, encodedLayer, name='encoder')
-        self.qencoder, _ = qkr.model_quantize(self.encoder,en_qdict,activation_bits)
+        self.qencoder = self.encoder
+        #self.qencoder, _ = qkr.model_quantize(self.encoder,en_qdict,activation_bits)
         if printSummary:
             self.encoder.summary()
             self.qencoder.summary()
@@ -168,7 +177,7 @@ class qDenseCNN:
         else:
             x = Conv2DTranspose(filters=self.pams['shape'][2], kernel_size=CNN_kernel_size[0], padding='same',
                                 name="conv2d_t_final")(x)
-
+        x = QActivation(qbits_param, name='q_decoder_output')(x)
         outputs = Activation('sigmoid', name='decoder_output')(x)
 
         self.decoder = Model(encoded_inputs, outputs, name='decoder')
@@ -177,7 +186,7 @@ class qDenseCNN:
 
         self.autoencoder = Model(inputs, self.decoder(self.encoder(inputs)), name='autoencoder')
         auto_dict = en_qdict
-        self.qautoencoder, _ = qkr.model_quantize(self.autoencoder, auto_dict, activation_bits)
+        self.qautoencoder = self.autoencoder #, _ = qkr.model_quantize(self.autoencoder, auto_dict, activation_bits)
         if printSummary:
             self.autoencoder.summary()
             self.qautoencoder.summary()

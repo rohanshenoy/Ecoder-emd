@@ -1,11 +1,11 @@
-import keras as kr
-from keras import losses
 import numpy as np
 import tensorflow as tf
 import pandas as pd
 import optparse
 from tensorflow.python.client import device_lib
-
+from tensorflow import keras as kr
+from tensorflow.keras import losses
+from qkeras import quantizers
 import os
 import matplotlib.pyplot as plt
 from models import *
@@ -165,6 +165,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   cross_corr_arr = np.array( [cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
   ssd_arr        = np.array([ssd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
 
+  #print(cross_corr_arr)
   plothist(cross_corr_arr,'cross correlation',name+"_corr")
   plothist(ssd_arr,'sum squared difference',name+"_ssd")
 
@@ -189,6 +190,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   occbins = [0,5,10,20,48]
   fig, axes = plt.subplots(1,len(occbins)-1, figsize=(16, 4))
   for i,ax in enumerate(axes):
+      #print(cross_corr_arr[selection])
       selection=np.logical_and(nonzeroQs<occbins[i+1],nonzeroQs>occbins[i])
       label = '%i<occ<%i'%(occbins[i],occbins[i+1])
       mu = np.mean(cross_corr_arr[selection])
@@ -210,10 +212,15 @@ def trainCNN(options,args):
   print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
   print("Is GPU available? ", tf.test.is_gpu_available())
 
+  qBits = options.qBits
+  qIntBits = options.qIntBits
+  m_quant = {'bits':qBits,'integer':qIntBits}
   qBitStr = "(bits="+str(options.qBits)+",integer="+str(options.qIntBits)+",keep_negative=1)"
   act_bits = options.qBits #currently the quantized bits for activation functions are just being set equal to total quantized bits, investigate if it shouldn't be?
 
-  # from keras import backend
+
+
+  # from tensorflow.keras import backend
   # backend.set_image_data_format('channels_first')
 
 
@@ -260,7 +267,7 @@ def trainCNN(options,args):
 
   models = [
     #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },
-    #{'name':'denseCNN_2',  'ws':'denseCNN_2.hdf5', 
+    #{'name':'denseCNN_2',  'ws':'denseCNN_2.hdf5',
     #  'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask  } },
 
     #{'name':'8x8_nomask','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8  }},
@@ -268,20 +275,20 @@ def trainCNN(options,args):
     #{'name':'nfils_842','ws':'nfils_842.hdf5','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,
     #        'CNN_layer_nodes':[8,4,2],
     #        'CNN_kernel_size':[3,3,3],
-    #        'CNN_pool':[False,False,False],     
-    #}} , 
+    #        'CNN_pool':[False,False,False],
+    #}} ,
     #{'name':'nfils_842_pool2','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,
     #        'CNN_layer_nodes':[8,4,2],
     #        'CNN_kernel_size':[3,3,3],
-    #        'CNN_pool':[False,True,False],     
-    #}} , 
+    #        'CNN_pool':[False,True,False],
+    #}} ,
     #{'name':'8x8_dim10','ws':'','vis_shape':(8,8),'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':10}},
     #{'name':'8x8_dim8','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':8}},
     #{'name':'8x8_dim4','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':4}},
     #{'name':'12x4_norm','ws':'','vis_shape':(12,4),'pams':{'shape':(12,4,1),
     #        'CNN_layer_nodes':[8,4,4,2],
     #        'CNN_kernel_size':[3,3,3,3],
-    #        'CNN_pool':[False,False,False,False],     
+    #        'CNN_pool':[False,False,False,False],
     #}},
 
     #{'name':'4x4_norm'    ,'ws':'4x4_norm.hdf5'    ,'pams':{'shape':(3,4,4) ,'channels_first':True }},
@@ -289,22 +296,22 @@ def trainCNN(options,args):
      #                                                       'encoded_dim':10, 'qbits':qBitStr}},
     {'name': '4x4_norm_d10', 'ws': '',
        'pams': {'shape': (4, 4, 3), 'channels_first': False, 'arrange': arrange443, 'encoded_dim': 10,
-                'loss': 'weightedMSE', 'qbits':qBitStr, 'act_bits':act_bits}},
+                'loss': 'weightedMSE', 'qbits':m_quant, 'act_bits':act_bits}},
     #{'name':'4x4_norm_d8' ,'ws':'4x4_norm_d8.hdf5' ,'pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
 
     #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[8,8],
     #     'CNN_kernel_size':[3,3],
-    #     'CNN_pool':[False,False], 
+    #     'CNN_pool':[False,False],
     #}},
     #{'name':'4x4_v2',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[8,8],
     #     'CNN_kernel_size':[3,3],
-    #     'CNN_pool':[False,False], 
+    #     'CNN_pool':[False,False],
     #     'Dense_layer_nodes':[16],
     #}},
     #{'name':'4x4_v3' ,'ws':'4x4_v3.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,'CNN_kernel_size':[2]}},
-    #{'name':'4x4_norm_v4','ws':'4x4_norm_v4.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #{'name':'4x4_norm_v4','ws':'4x4_norm_v4.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[4,4,4],
     #     'CNN_kernel_size':[3,3,3],
     #     'CNN_pool':[False,False,False],
@@ -319,7 +326,7 @@ def trainCNN(options,args):
     #     'CNN_kernel_size':[5,5,3],
     #     'CNN_pool':[False,False,False],
     #}},
-    #{'name':'4x4_norm_v7','ws':'4x4_norm_v7.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #{'name':'4x4_norm_v7','ws':'4x4_norm_v7.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[4,4,4],
     #     'CNN_kernel_size':[5,5,3],
     #     'CNN_pool':[False,False,False],
@@ -329,31 +336,31 @@ def trainCNN(options,args):
     #     'CNN_kernel_size':[3,3,3,3,3],
     #     'CNN_pool':[0,0,0,0,0],
     #}},
-    #{'name':'4x4_norm_v8_clone10','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #{'name':'4x4_norm_v8_clone10','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[8,4,4,4,2],
     #     'CNN_kernel_size':[3,3,3,3,3],
     #     'CNN_pool':[0,0,0,0,0],
     #     'n_copy':10,'occ_low':20,'occ_hi':48,
     #}},
-    #{'name':'4x4_norm_v8_wmse','ws':'4x4_norm_v8_wmse.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #{'name':'4x4_norm_v8_wmse','ws':'4x4_norm_v8_wmse.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[8,4,4,4,2],
     #     'CNN_kernel_size':[3,3,3,3,3],
     #     'CNN_pool':[0,0,0,0,0],
     #     'loss':'weightedMSE'
     #}},
-    #{'name':'4x4_norm_v8_KL','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #{'name':'4x4_norm_v8_KL','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[8,4,4,4,2],
     #     'CNN_kernel_size':[3,3,3,3,3],
     #     'CNN_pool':[0,0,0,0,0],
     #     'loss':'kullback_leibler_divergence'
     #}},
-    #{'name':'4x4_norm_v8_skimOcc','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #{'name':'4x4_norm_v8_skimOcc','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[8,4,4,4,2],
     #     'CNN_kernel_size':[3,3,3,3,3],
     #     'CNN_pool':[0,0,0,0,0],
     #     'skimOcc':True,'occ_low':20,'occ_hi':48,
     #}},
-    #{'name':'4x4_norm_v8_hinge','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True, 
+    #{'name':'4x4_norm_v8_hinge','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True,
     #     'CNN_layer_nodes':[8,4,4,4,2],
     #     'CNN_kernel_size':[3,3,3,3,3],
     #     'CNN_pool':[0,0,0,0,0],
@@ -367,24 +374,24 @@ def trainCNN(options,args):
   #os.chdir('./12x4/')
   os.chdir(options.odir)
   for model in models:
-    model_name = model['name']
+    model_name = model['name'] + "_quant_" + str(qBits) + "b_" + str(qIntBits) + "b-int"
     if not os.path.exists(model_name):
       os.mkdir(model_name)
     os.chdir(model_name)
-   
+
     m = qDenseCNN(weights_f=model['ws'])
     m.setpams(model['pams'])
     m.init()
     shaped_data                = m.prepInput(normdata)
     val_input, train_input     = split(shaped_data)
     m_autoCNN , m_autoCNNen    = m.get_q_models()
-    
+
     if model['ws']=='':
       history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
     else:
       save_models(m_autoCNN,model_name)
 
-    Nevents = 8 
+    Nevents = 8
     N_verify = 50
 
     input_Q,cnn_deQ ,cnn_enQ   = m.q_predict(val_input)
@@ -393,12 +400,15 @@ def trainCNN(options,args):
     np.savetxt("verify_output.csv",cnn_enQ[0:N_verify].reshape(N_verify,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
     np.savetxt("verify_decoded.csv",cnn_deQ[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
 
-    index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
+    index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
+    '''
     corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
 
-    hi_corr_index = (np.where(corr_arr>0.9))[0]
-    low_corr_index = (np.where(corr_arr<0.2))[0]
+    #hi_corr_index = (np.where(corr_arr>0.9))[0]
+    #low_corr_index = (np.where(corr_arr<0.2))[0]
+    '''
     visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
+    '''
     if len(hi_corr_index)>0:
         index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
         visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
@@ -409,13 +419,13 @@ def trainCNN(options,args):
 
     model['corr'] = np.round(np.mean(corr_arr),3)
     model['ssd'] = np.round(np.mean(ssd_arr),3)
-
+    '''
     summary = summary.append({'name':model_name,
-                              'corr':model['corr'],
-                              'ssd':model['ssd'],
+                             # 'corr':model['corr'],
+                             # 'ssd':model['ssd'],
                               'en_pams' : m_autoCNNen.count_params(),
                               'tot_pams': m_autoCNN.count_params(),
-                              'ssd':model['ssd'],
+                             # 'ssd':model['ssd'],
                               },ignore_index=True)
 
     #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
