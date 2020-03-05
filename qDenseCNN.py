@@ -1,6 +1,7 @@
 import tensorflow as tf
 import tensorflow.keras as kr
-from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, \
+    Conv2DTranspose, Reshape, Activation
 from tensorflow.keras.models import Model
 from tensorflow.keras import backend as K
 import qkeras as qkr
@@ -94,15 +95,11 @@ class qDenseCNN:
         channels_first = self.pams['channels_first']
 
         inputs = Input(shape=self.pams['shape'])  # adapt this if using `channels_first` image data format
-        qbits = self.pams['qbits'] #quantized bits string, (bits=n,integer=m,keep_negitive=1), weights should *always* be signed
+
+        qbits = self.pams['qbits'] # Quantization precision parameters
+        #qbits_param - quantizer to pass to QKeras layers, used for both kernel and bias
         qbits_param = qkr.quantized_bits(bits=qbits['bits'],integer=qbits['integer'],keep_negative=1)
-        #qbits = {
-        #    "kernel_quantizer": "quantized_bits" + qbits_param,
-        #    "bias_quantizer": "quantized_bits" + qbits_param
-        #}
-        activation_bits =  self.pams['act_bits']
-        en_qdict = {}
-        de_qdict = {}
+
         x = inputs
 
         for i, n_nodes in enumerate(CNN_layer_nodes):
@@ -138,11 +135,8 @@ class qDenseCNN:
 
         # Instantiate Encoder Model
         self.encoder = Model(inputs, encodedLayer, name='encoder')
-        self.qencoder = self.encoder
-        #self.qencoder, _ = qkr.model_quantize(self.encoder,en_qdict,activation_bits)
         if printSummary:
             self.encoder.summary()
-            self.qencoder.summary()
 
         encoded_inputs = Input(shape=(encoded_dim,), name='decoder_input')
         x = encoded_inputs
@@ -177,7 +171,7 @@ class qDenseCNN:
         else:
             x = Conv2DTranspose(filters=self.pams['shape'][2], kernel_size=CNN_kernel_size[0], padding='same',
                                 name="conv2d_t_final")(x)
-        x = QActivation(qbits_param, name='q_decoder_output')(x)
+        x = QActivation(qbits_param, name='q_decoder_output')(x) #Verify this step needed?
         outputs = Activation('sigmoid', name='decoder_output')(x)
 
         self.decoder = Model(encoded_inputs, outputs, name='decoder')
@@ -185,30 +179,19 @@ class qDenseCNN:
             self.decoder.summary()
 
         self.autoencoder = Model(inputs, self.decoder(self.encoder(inputs)), name='autoencoder')
-        auto_dict = en_qdict
-        self.qautoencoder = self.autoencoder #, _ = qkr.model_quantize(self.autoencoder, auto_dict, activation_bits)
         if printSummary:
             self.autoencoder.summary()
-            self.qautoencoder.summary()
 
         if self.pams['loss'] == "weightedMSE":
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
-            #quantized models
-            self.qautoencoder.compile(loss=self.weightedMSE, optimizer='adam')
-            self.qencoder.compile(loss=self.weightedMSE, optimizer='adam')
+
         elif self.pams['loss'] != '':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')
-            #quantized models
-            self.qautoencoder.compile(loss=self.pams['loss'], optimizer='adam')
-            self.qencoder.compile(loss=self.pams['loss'], optimizer='adam')
         else:
             self.autoencoder.compile(loss='mse', optimizer='adam')
             self.encoder.compile(loss='mse', optimizer='adam')
-            #quantized models
-            self.qautoencoder.compile(loss='mse', optimizer='adam')
-            self.qencoder.compile(loss='mse', optimizer='adam')
 
         CNN_layers = ''
         if len(CNN_layer_nodes) > 0:
@@ -230,8 +213,7 @@ class qDenseCNN:
 
     def get_models(self):
         return self.autoencoder, self.encoder
-    def get_q_models(self):
-        return self.qautoencoder, self.qencoder
+
 
     def predict(self, x):
         decoded_Q = self.autoencoder.predict(x)
@@ -247,29 +229,10 @@ class qDenseCNN:
             encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
         return shaped_x, decoded_Q, encoded_Q
 
-    def q_predict(self, x):
-        decoded_Q = self.qautoencoder.predict(x)
-        encoded_Q = self.qencoder.predict(x)
-        s = self.pams['shape']
-        if self.pams['channels_first']:
-            shaped_x = np.reshape(x, (len(x), s[0] * s[1], s[2]))
-            decoded_Q = np.reshape(decoded_Q, (len(decoded_Q), s[0] * s[1], s[2]))
-            encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
-        else:
-            shaped_x = np.reshape(x, (len(x), s[2] * s[1], s[0]))
-            decoded_Q = np.reshape(decoded_Q, (len(decoded_Q), s[2] * s[1], s[0]))
-            encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
-        return shaped_x, decoded_Q, encoded_Q
-
     def summary(self):
         self.encoder.summary()
         self.decoder.summary()
         self.autoencoder.summary()
-
-    def q_summary(self):
-        self.qencoder.summary()
-        self.decoder.summary()
-        self.qautoencoder.summary()
 
     ##get pams for writing json
     def get_pams(self):
