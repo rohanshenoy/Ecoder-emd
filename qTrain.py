@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 import pandas as pd
 import optparse
+import shutil
 from tensorflow.python.client import device_lib
 from tensorflow import keras as kr
 import os
@@ -399,6 +400,7 @@ def trainCNN(options,args):
     if not os.path.exists(model_name):
       os.mkdir(model_name)
     os.chdir(model_name)
+    shutil.copyfile("../../tests/verify_emd.py", "verify_emd.py")
 
     m = qDenseCNN(weights_f=model['ws'])
     m.setpams(model['pams'])
@@ -418,9 +420,10 @@ def trainCNN(options,args):
     input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
     
     ## csv files for RTL verification
-    np.savetxt("verify_input.csv", input_Q[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
-    np.savetxt("verify_output.csv",cnn_enQ[0:N_verify].reshape(N_verify,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
-    np.savetxt("verify_decoded.csv",cnn_deQ[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
+    N_csv=input_Q.shape[0] # about 80k
+    np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
+    np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
+    np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
 
     index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
     corr_arr, ssd_arr, emd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)

@@ -4,6 +4,7 @@ import numpy as np
 import tensorflow as tf
 import pandas as pd
 import optparse
+import shutil
 from tensorflow.python.client import device_lib
 
 import os
@@ -13,6 +14,9 @@ from models import *
 import numba
 import json
 from denseCNN import denseCNN 
+
+#for earth movers distance calculation
+import ot
 
 @numba.jit
 def normalize(data):
@@ -56,7 +60,7 @@ def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
   plt.ylabel('Loss')
   plt.xlabel('Epoch')
   plt.legend(['Train', 'Test'], loc='upper right')
-  plt.savefig("history_%s.jpg"%name)
+  plt.savefig("history_%s.png"%name)
   #plt.show()
 
   save_models(autoencoder,name)
@@ -104,6 +108,25 @@ def ssd(x,y):
     ssd = ssd/(np.sum(x**2)*np.sum(y**2))**0.5
     return ssd
 
+# calculate "earth mover's distance"
+# (cost, in distance, to move earth from one config to another)
+from util import GetHexCoords
+hexCoords = GetHexCoords()
+hexMetric = ot.dist(hexCoords, hexCoords, 'euclidean')
+def emd(x, y, threshold=-1):
+    # data must be normalized to same area to compute EMD
+    x = 1.*x.flatten()/x.sum()
+    y = 1.*y.flatten()/y.sum()
+
+    # threshold = 0.02
+    if threshold > 0:
+        # only keep entries above 2%, e.g.
+        x = np.where(x>threshold,x,0)
+        y = np.where(y>threshold,y,0)
+        x = 1.*x/x.sum()
+        y = 1.*y/y.sum()
+
+    return ot.emd2(x, y, hexMetric)
 
 def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
   if index.size==0:
@@ -142,7 +165,7 @@ def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
     plt.colorbar(c1,ax=axs[2,i])
   
   plt.tight_layout()
-  plt.savefig("%s_examples.jpg"%name)
+  plt.savefig("%s_examples.png"%name)
  
 def visMetric(input_Q,decoded_Q,maxQ,name): 
   #plt.show()
@@ -158,21 +181,23 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
     plt.xlabel(xlabel)
     plt.ylabel('Entry')
     plt.title('%s on validation set'%xlabel)
-    plt.savefig("hist_%s.jpg"%name)
+    plt.savefig("hist_%s.png"%name)
 
 
-  cross_corr_arr = np.array( [cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
+  cross_corr_arr = np.array([cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
   ssd_arr        = np.array([ssd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
+  emd_arr        = np.array([emd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
 
   plothist(cross_corr_arr,'cross correlation',name+"_corr")
   plothist(ssd_arr,'sum squared difference',name+"_ssd")
+  plothist(emd_arr,'earth movers distance',name+"_emd")
 
   plt.figure(figsize=(6,4))
   plt.hist([input_Q.flatten(),decoded_Q.flatten()],20,label=['input','output'])
   plt.yscale('log')
   plt.legend(loc='upper right')
   plt.xlabel('Charge fraction')
-  plt.savefig("hist_Qfr_%s.jpg"%name)
+  plt.savefig("hist_Qfr_%s.png"%name)
 
   input_Q_abs   = np.array([input_Q[i] * maxQ[i] for i in range(0,len(input_Q))])
   decoded_Q_abs = np.array([decoded_Q[i]*maxQ[i] for i in range(0,len(decoded_Q))])
@@ -182,7 +207,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   plt.yscale('log')
   plt.legend(loc='upper right')
   plt.xlabel('Charge')
-  plt.savefig("hist_Qabs_%s.jpg"%name)
+  plt.savefig("hist_Qabs_%s.png"%name)
 
   nonzeroQs = np.count_nonzero(input_Q_abs.reshape(len(input_Q_abs),48),axis=1)
   occbins = [0,5,10,20,48]
@@ -197,9 +222,9 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
       ax.set(xlabel='corr',title=label)
   plt.tight_layout()
   #plt.show()
-  plt.savefig('corr_vs_occ_%s.jpg'%name)
+  plt.savefig('corr_vs_occ_%s.png'%name)
 
-  return cross_corr_arr,ssd_arr
+  return cross_corr_arr,ssd_arr,emd_arr
 
 
 def trainCNN(options,args):
@@ -355,7 +380,7 @@ def trainCNN(options,args):
 
   ]
 
-  summary = pd.DataFrame(columns=['name','en_pams','tot_pams','corr','ssd'])
+  summary = pd.DataFrame(columns=['name','en_pams','tot_pams','corr','ssd','emd'])
   #os.chdir('./CNN/')
   #os.chdir('./12x4/')
   os.chdir(options.odir)
@@ -364,7 +389,8 @@ def trainCNN(options,args):
     if not os.path.exists(model_name):
       os.mkdir(model_name)
     os.chdir(model_name)
-   
+    shutil.copyfile("../../tests/verify_emd.py", "verify_emd.py")
+
     m = denseCNN(weights_f=model['ws']) 
     m.setpams(model['pams'])
     m.init()
@@ -382,12 +408,13 @@ def trainCNN(options,args):
 
     input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
     ## csv files for RTL verification
-    np.savetxt("verify_input.csv", input_Q[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
-    np.savetxt("verify_output.csv",cnn_enQ[0:N_verify].reshape(N_verify,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
-    np.savetxt("verify_decoded.csv",cnn_deQ[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
+    N_csv=input_Q.shape[0] # about 80k
+    np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
+    np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
+    np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
 
     index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
-    corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
+    corr_arr, ssd_arr, emd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
 
     hi_corr_index = (np.where(corr_arr>0.9))[0]
     low_corr_index = (np.where(corr_arr<0.2))[0]
@@ -402,13 +429,14 @@ def trainCNN(options,args):
 
     model['corr'] = np.round(np.mean(corr_arr),3)
     model['ssd'] = np.round(np.mean(ssd_arr),3)
+    model['emd'] = np.round(np.mean(emd_arr),3)
 
     summary = summary.append({'name':model_name,
                               'corr':model['corr'],
                               'ssd':model['ssd'],
+                              'emd':model['emd'],
                               'en_pams' : m_autoCNNen.count_params(),
                               'tot_pams': m_autoCNN.count_params(),
-                              'ssd':model['ssd'],
                               },ignore_index=True)
 
     #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
