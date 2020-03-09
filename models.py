@@ -1,7 +1,7 @@
-from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D
-from keras.models import Model
-from keras import backend as K
-import keras as kr
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D
+from tensorflow.keras.models import Model
+from tensorflow.keras import backend as K
+import tensorflow.keras as kr
 import qkeras as qkr
 
 

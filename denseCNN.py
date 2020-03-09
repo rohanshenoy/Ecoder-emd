@@ -1,6 +1,6 @@
-from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation 
-from keras.models import Model
-from keras import backend as K
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation
+from tensorflow.keras.models import Model
+from tensorflow.keras import backend as K
 import numpy as np
 import json
 
