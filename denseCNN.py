@@ -1,6 +1,6 @@
-from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation 
-from keras.models import Model
-from keras import backend as K
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation
+from tensorflow.keras.models import Model
+from tensorflow.keras import backend as K
 import numpy as np
 import json
 
@@ -143,9 +143,9 @@ class denseCNN:
 
         if channels_first:
           #shape[0] will be # of channel
-          x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=CNN_kernel_size,padding='same',data_format='channels_first')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=CNN_kernel_size[0],padding='same',data_format='channels_first')(x)
         else:
-          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=CNN_kernel_size,padding='same')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=CNN_kernel_size[0],padding='same')(x)
 
         outputs = Activation('sigmoid', name='decoder_output')(x)
 

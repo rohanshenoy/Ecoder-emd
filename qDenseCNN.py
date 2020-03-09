@@ -1,13 +1,17 @@
-from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation
-from keras.models import Model
-from keras import backend as K
+import tensorflow as tf
+import tensorflow.keras as kr
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, \
+    Conv2DTranspose, Reshape, Activation
+from tensorflow.keras.models import Model
+from tensorflow.keras import backend as K
 import qkeras as qkr
-from qkeras.qlayers import QConv2D,QActivation,QDense
+from qkeras import QDense, QConv2D, QActivation
+#from qkeras.qlayers import QConv2D,QActivation,QDense
 import numpy as np
 import json
 
 
-class denseCNN:
+class qDenseCNN:
     def __init__(self, name='', weights_f=''):
         self.name = name
         self.pams = {
@@ -81,7 +85,7 @@ class denseCNN:
         loss = K.mean(K.square(y_true - y_pred) * K.maximum(y_pred, y_true), axis=(-1))
         return loss
 
-    def init(self, printSummary=True):
+    def init(self, printSummary=True): # keep_negitive = 0 on inputs, otherwise for weights keep default (=1)
         encoded_dim = self.pams['encoded_dim']
 
         CNN_layer_nodes = self.pams['CNN_layer_nodes']
@@ -91,29 +95,43 @@ class denseCNN:
         channels_first = self.pams['channels_first']
 
         inputs = Input(shape=self.pams['shape'])  # adapt this if using `channels_first` image data format
+
+        qbits = self.pams['qbits'] # Quantization precision parameters
+        #qbits_param - quantizer to pass to QKeras layers, used for both kernel and bias
+        qbits_param = qkr.quantized_bits(bits=qbits['bits'],integer=qbits['integer'],keep_negative=1)
+
         x = inputs
 
         for i, n_nodes in enumerate(CNN_layer_nodes):
             if channels_first:
                 x = QConv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',
-                           data_format='channels_first')(x)
+                           data_format='channels_first', name="conv2d_"+str(i)+"_m",
+                           kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
             else:
-                x = Conv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same')(x)
+                x = QConv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same', name="conv2d_"+str(i)+"_m",
+                           kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
+            ###en_qdict.update({"conv2d_"+str(i)+"_m":qbits})
             if CNN_pool[i]:
                 if channels_first:
-                    x = MaxPooling2D((2, 2), padding='same', data_format='channels_first')(x)
+                    x = MaxPooling2D((2, 2), padding='same', data_format='channels_first', name="mp_"+str(i))(x)
                 else:
-                    x = MaxPooling2D((2, 2), padding='same')(x)
+                    x = MaxPooling2D((2, 2), padding='same', name="mp_"+str(i))(x)
+                #en_qdict.update({"mp_" + str(i): qbits})
 
         shape = K.int_shape(x)
 
-        x = Flatten()(x)
+        x = Flatten(name="flatten")(x)
+        #en_qdict.update({"flatten": qbits})
 
         # encoder dense nodes
-        for n_nodes in Dense_layer_nodes:
-            x = Dense(n_nodes, activation='relu')(x)
+        for i, n_nodes in enumerate(Dense_layer_nodes):
+            x = QDense(n_nodes, activation='relu', name="en_dense_"+str(i),
+                           kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
+            #en_qdict.update({"en_dense_" + str(i): qbits})
 
-        encodedLayer = Dense(encoded_dim, activation='relu', name='encoded_vector')(x)
+        encodedLayer = QDense(encoded_dim, activation='relu', name='encoded_vector',
+                           kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
+        #en_qdict.update({"encoded_vector": qbits})
 
         # Instantiate Encoder Model
         self.encoder = Model(inputs, encodedLayer, name='encoder')
@@ -124,33 +142,36 @@ class denseCNN:
         x = encoded_inputs
 
         # decoder dense nodes
-        for n_nodes in Dense_layer_nodes:
-            x = Dense(n_nodes, activation='relu')(x)
+        for i, n_nodes in enumerate(Dense_layer_nodes):
+            x = Dense(n_nodes, activation='relu', name="de_dense_"+str(i))(x)
 
-        x = Dense(shape[1] * shape[2] * shape[3], activation='relu')(x)
-        x = Reshape((shape[1], shape[2], shape[3]))(x)
+        x = Dense(shape[1] * shape[2] * shape[3], activation='relu', name='de_dense_final')(x)
+        x = Reshape((shape[1], shape[2], shape[3]),name="de_reshape")(x)
 
         for i, n_nodes in enumerate(CNN_layer_nodes):
 
             if CNN_pool[i]:
                 if channels_first:
-                    x = UpSampling2D((2, 2), data_format='channels_first')(x)
+                    x = UpSampling2D((2, 2), data_format='channels_first', name="up_"+str(i))(x)
                 else:
-                    x = UpSampling2D((2, 2))(x)
+                    x = UpSampling2D((2, 2), name="up_"+str(i))(x)
 
             if channels_first:
                 x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',
-                                    data_format='channels_first')(x)
+                                    data_format='channels_first', name="conv2D_t_"+str(i))(x)
             else:
-                x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same')(x)
+                x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',
+                                    name="conv2D_t_"+str(i))(x)
 
         if channels_first:
             # shape[0] will be # of channel
-            x = Conv2DTranspose(filters=self.pams['shape'][0], kernel_size=CNN_kernel_size, padding='same',
-                                data_format='channels_first')(x)
-        else:
-            x = Conv2DTranspose(filters=self.pams['shape'][2], kernel_size=CNN_kernel_size, padding='same')(x)
+            x = Conv2DTranspose(filters=self.pams['shape'][0], kernel_size=CNN_kernel_size[0], padding='same',
+                                data_format='channels_first', name="conv2d_t_final")(x)
 
+        else:
+            x = Conv2DTranspose(filters=self.pams['shape'][2], kernel_size=CNN_kernel_size[0], padding='same',
+                                name="conv2d_t_final")(x)
+        x = QActivation(qbits_param, name='q_decoder_output')(x) #Verify this step needed?
         outputs = Activation('sigmoid', name='decoder_output')(x)
 
         self.decoder = Model(encoded_inputs, outputs, name='decoder')
@@ -164,6 +185,7 @@ class denseCNN:
         if self.pams['loss'] == "weightedMSE":
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
+
         elif self.pams['loss'] != '':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')
@@ -191,6 +213,7 @@ class denseCNN:
 
     def get_models(self):
         return self.autoencoder, self.encoder
+
 
     def predict(self, x):
         decoded_Q = self.autoencoder.predict(x)
