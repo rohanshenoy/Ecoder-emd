@@ -18,8 +18,8 @@ from denseCNN import denseCNN
 def normalize(data):
     norm =[]
     for i in range(len(data)):
-        norm.append( data[i].max() )
-        data[i] = 1.*data[i]/data[i].max()
+        norm.append( data[i].sum() )
+        data[i] = 1.*data[i]/data[i].sum()
     return data,np.array(norm)
 
 def split(shaped_data, validation_frac=0.2):

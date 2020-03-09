@@ -29,30 +29,31 @@ def main():
             for my in range(T1.shape[1]):
                 if T1[mx,my]:
                     print("{},{} = {}".format(mx,my,T1[mx,my]))
-
-    inputImg =[in1.reshape(12,4), in2.reshape(12,4)]
-    outputImg=[out1.reshape(12,4),out2.reshape(12,4)]
-    inToOut = [np.matmul(T1.T,np.ones(48)).reshape(12,4),np.matmul(T2.T,np.ones(48)).reshape(12,4)]
-    outToIn = [np.matmul(T1,np.ones(48)).reshape(12,4),np.matmul(T2,np.ones(48)).reshape(12,4)]
-    fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(8, 4))
-    
-    for i in range(2):
-        axs[i,0].set(xlabel='cell_x' if i==1 else '',ylabel='cell_y',title='Input_%i'%i)
-        axs[i,1].set(xlabel='cell_x' if i==1 else '',ylabel='',title='Ouput_%i'%i)
-        axs[i,2].set(xlabel='cell_x' if i==1 else '',ylabel='',title='inFromT_%i'%i)
-        axs[i,3].set(xlabel='cell_x' if i==1 else '',ylabel='',title='outFromT_%i'%i)
-
-        c0=axs[i,0].imshow(inputImg[i])
-        plt.colorbar(c0,ax=axs[i,0])
-        c1=axs[i,1].imshow(outputImg[i])
-        plt.colorbar(c1,ax=axs[i,1])
-        c2=axs[i,2].imshow(outToIn[i])
-        plt.colorbar(c2,ax=axs[i,2])
-        c3=axs[i,3].imshow(inToOut[i])
-        plt.colorbar(c3,ax=axs[i,3])
-    
-    plt.tight_layout()
-    plt.savefig("displays.png")
+    doPlot=False
+    if doPlot:
+        inputImg =[in1.reshape(12,4), in2.reshape(12,4)]
+        outputImg=[out1.reshape(12,4),out2.reshape(12,4)]
+        inToOut = [np.matmul(T1.T,np.ones(48)).reshape(12,4),np.matmul(T2.T,np.ones(48)).reshape(12,4)]
+        outToIn = [np.matmul(T1,np.ones(48)).reshape(12,4),np.matmul(T2,np.ones(48)).reshape(12,4)]
+        fig, axs = plt.subplots(nrows=2, ncols=4, figsize=(8, 4))
+        
+        for i in range(2):
+            axs[i,0].set(xlabel='cell_x' if i==1 else '',ylabel='cell_y',title='Input_%i'%i)
+            axs[i,1].set(xlabel='cell_x' if i==1 else '',ylabel='',title='Ouput_%i'%i)
+            axs[i,2].set(xlabel='cell_x' if i==1 else '',ylabel='',title='inFromT_%i'%i)
+            axs[i,3].set(xlabel='cell_x' if i==1 else '',ylabel='',title='outFromT_%i'%i)
+        
+            c0=axs[i,0].imshow(inputImg[i])
+            plt.colorbar(c0,ax=axs[i,0])
+            c1=axs[i,1].imshow(outputImg[i])
+            plt.colorbar(c1,ax=axs[i,1])
+            c2=axs[i,2].imshow(outToIn[i])
+            plt.colorbar(c2,ax=axs[i,2])
+            c3=axs[i,3].imshow(inToOut[i])
+            plt.colorbar(c3,ax=axs[i,3])
+        
+        plt.tight_layout()
+        plt.savefig("displays.png")
     return
 
 # lookup (x,y) values corresponding to the 48 cell centers

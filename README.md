@@ -18,7 +18,7 @@ Setup environment using miniconda3
 source install_miniconda3.sh #if your first time
 source setup.sh #also if your first time
 conda activate ecoder-env
-pip install keras tensorflow numba numpy pandas matplotlib tensorflow_model_optimization pillow
+pip install keras tensorflow numba numpy pandas matplotlib tensorflow_model_optimization pillow ot
 ```
 Setup qkeras (h/t Thea!):
 ```
