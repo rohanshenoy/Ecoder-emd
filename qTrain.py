@@ -127,12 +127,12 @@ def GetHexCoords():
 # (cost, in distance, to move earth from one config to another)
 hexCoords = GetHexCoords()
 hexMetric = ot.dist(hexCoords, hexCoords, 'euclidean')
-def emd(x, y, threshold=-1):
-    # data must be normalized to same area to compute EMD
-    x = 1.*x.flatten()/x.sum()
-    y = 1.*y.flatten()/y.sum()
+def emd(_x, _y, threshold=-1):    
+    x = np.array(_x, dtype=np.float64)
+    y = np.array(_y, dtype=np.float64)
+    x = 1./x.sum()*x.flatten()
+    y = 1./y.sum()*y.flatten()
 
-    # threshold = 0.02
     if threshold > 0:
         # only keep entries above 2%, e.g.
         x = np.where(x>threshold,x,0)

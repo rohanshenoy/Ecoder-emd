@@ -128,12 +128,12 @@ def GetHexCoords():
 # (cost, in distance, to move earth from one config to another)
 hexCoords = GetHexCoords()
 hexMetric = ot.dist(hexCoords, hexCoords, 'euclidean')
-def emd(x, y, threshold=-1):
-    # data must be normalized to same area to compute EMD
-    x = 1.*x.flatten()/x.sum()
-    y = 1.*y.flatten()/y.sum()
+def emd(_x, _y, threshold=-1):    
+    x = np.array(_x, dtype=np.float64)
+    y = np.array(_y, dtype=np.float64)
+    x = 1./x.sum()*x.flatten()
+    y = 1./y.sum()*y.flatten()
 
-    # threshold = 0.02
     if threshold > 0:
         # only keep entries above 2%, e.g.
         x = np.where(x>threshold,x,0)
@@ -423,7 +423,7 @@ def trainCNN(options,args):
 
     input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
     ## csv files for RTL verification
-    N_csv=input_Q.shape[0] # about 80k
+    N_csv= (options.nCSV if options.nCSV>=0 else input_Q.shape[0]) # about 80k
     np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
     np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
     np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
@@ -431,16 +431,17 @@ def trainCNN(options,args):
     index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
     corr_arr, ssd_arr, emd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
 
-    hi_corr_index = (np.where(corr_arr>0.9))[0]
-    low_corr_index = (np.where(corr_arr<0.2))[0]
-    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
-    if len(hi_corr_index)>0:
-        index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
-        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
-    
-    if len(low_corr_index)>0:
-        index = np.random.choice(low_corr_index,min(Nevents,len(low_corr_index)), replace=False)  
-        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
+    if not options.skipPlot:
+        hi_corr_index = (np.where(corr_arr>0.9))[0]
+        low_corr_index = (np.where(corr_arr<0.2))[0]
+        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
+        if len(hi_corr_index)>0:
+            index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
+            visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
+        
+        if len(low_corr_index)>0:
+            index = np.random.choice(low_corr_index,min(Nevents,len(low_corr_index)), replace=False)  
+            visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
 
     model['corr'] = np.round(np.mean(corr_arr),3)
     model['ssd'] = np.round(np.mean(ssd_arr),3)
@@ -469,6 +470,8 @@ if __name__== "__main__":
     parser.add_option('-i',"--inputFile", type="string", default = 'CALQ_output_10x.csv',dest="inputFile", help="input TSG ntuple")
     parser.add_option("--dryRun", action='store_true', default = False,dest="dryRun", help="dryRun")
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
+    parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
+    parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
 
     (options, args) = parser.parse_args()
     trainCNN(options,args)
