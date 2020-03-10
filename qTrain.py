@@ -12,12 +12,19 @@ import json
 
 from qDenseCNN import qDenseCNN
 
+#for earth movers distance calculation
+import ot
+
 @numba.jit
-def normalize(data):
+def normalize(data,rescaleInputToMax=False):
     norm =[]
     for i in range(len(data)):
-        norm.append( data[i].max() )
-        data[i] = 1.*data[i]/data[i].max()
+        if rescaleInputToMax:
+            norm.append( data[i].max() )
+            data[i] = 1.*data[i]/data[i].max()
+        else:
+            norm.append( data[i].sum() )
+            data[i] = 1.*data[i]/data[i].sum()
     return data,np.array(norm)
 
 def split(shaped_data, validation_frac=0.2):
@@ -93,7 +100,8 @@ def predict(x,autoencoder,encoder,reshape=True):
 ### cross correlation of input/output 
 def cross_corr(x,y):
     cov = np.cov(x.flatten(),y.flatten())
-    std = np.sqrt(np.diag(cov)+(1e-10 * np.ones_like(cov)))
+    std = np.sqrt(np.diag(cov)+1e-10)
+    #std = np.sqrt(np.diag(cov)+(1e-10 * np.ones_like(cov)))
     corr = cov / np.multiply.outer(std, std)
     return corr[0,1]
 
@@ -102,6 +110,40 @@ def ssd(x,y):
     ssd = ssd/(np.sum(x**2)*np.sum(y**2))**0.5
     return ssd
 
+def GetHexCoords():
+    return np.array([ 
+        [0.0, 0.0], [0.0, -2.4168015], [0.0, -4.833603], [0.0, -7.2504044], 
+        [2.09301, -1.2083969], [2.09301, -3.6251984], [2.09301, -6.042], [2.09301, -8.458794], 
+        [4.18602, -2.4168015], [4.18602, -4.833603], [4.18602, -7.2504044], [4.18602, -9.667198], 
+        [6.27903, -3.6251984], [6.27903, -6.042], [6.27903, -8.458794], [6.27903, -10.875603], 
+        [-8.37204, -10.271393], [-6.27903, -9.063004], [-4.18602, -7.854599], [-2.0930138, -6.6461945], 
+        [-8.37204, -7.854599], [-6.27903, -6.6461945], [-4.18602, -5.4377975], [-2.0930138, -4.229393], 
+        [-8.37204, -5.4377975], [-6.27903, -4.229393], [-4.18602, -3.020996], [-2.0930138, -1.8125992], 
+        [-8.37204, -3.020996], [-6.27903, -1.8125992], [-4.18602, -0.6042023], [-2.0930138, 0.6042023], 
+        [4.7092705, -12.386101], [2.6162605, -11.177696], [0.5232506, -9.969299], [-1.5697594, -8.760895], 
+        [2.6162605, -13.594498], [0.5232506, -12.386101], [-1.5697594, -11.177696], [-3.6627693, -9.969299], 
+        [0.5232506, -14.802895], [-1.5697594, -13.594498], [-3.6627693, -12.386101], [-5.7557793, -11.177696], 
+        [-1.5697594, -16.0113], [-3.6627693, -14.802895], [-5.7557793, -13.594498], [-7.848793, -12.386101]
+    ])
+
+# calculate "earth mover's distance"
+# (cost, in distance, to move earth from one config to another)
+hexCoords = GetHexCoords()
+hexMetric = ot.dist(hexCoords, hexCoords, 'euclidean')
+def emd(_x, _y, threshold=-1):    
+    x = np.array(_x, dtype=np.float64)
+    y = np.array(_y, dtype=np.float64)
+    x = 1./x.sum()*x.flatten()
+    y = 1./y.sum()*y.flatten()
+
+    if threshold > 0:
+        # only keep entries above 2%, e.g.
+        x = np.where(x>threshold,x,0)
+        y = np.where(y>threshold,y,0)
+        x = 1.*x/x.sum()
+        y = 1.*y/y.sum()
+
+    return ot.emd2(x, y, hexMetric)
 
 def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
   if index.size==0:
@@ -159,12 +201,13 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
     plt.savefig("hist_%s.png"%name)
 
 
-  cross_corr_arr = np.array( [cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
+  cross_corr_arr = np.array([cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
   ssd_arr        = np.array([ssd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
+  emd_arr        = np.array([emd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
 
-  #print(cross_corr_arr)
   plothist(cross_corr_arr,'cross correlation',name+"_corr")
   plothist(ssd_arr,'sum squared difference',name+"_ssd")
+  plothist(emd_arr,'earth movers distance',name+"_emd")
 
   plt.figure(figsize=(6,4))
   plt.hist([input_Q.flatten(),decoded_Q.flatten()],20,label=['input','output'])
@@ -199,7 +242,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   #plt.show()
   plt.savefig('corr_vs_occ_%s.png'%name)
 
-  return cross_corr_arr,ssd_arr
+  return cross_corr_arr,ssd_arr,emd_arr
 
 
 def trainCNN(options,args):
@@ -223,7 +266,7 @@ def trainCNN(options,args):
 
 
   data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
-  normdata,maxdata = normalize(data.values.copy())
+  normdata,maxdata = normalize(data.values.copy(),rescaleInputToMax=options.rescaleInputToMax)
 
   arrange8x8 = np.array([
               28,29,30,31,0,4,8,12,
@@ -366,7 +409,7 @@ def trainCNN(options,args):
 
   ]
 
-  summary = pd.DataFrame(columns=['name','en_pams','tot_pams','corr','ssd'])
+  summary = pd.DataFrame(columns=['name','en_pams','tot_pams','corr','ssd','emd'])
   #os.chdir('./CNN/')
   #os.chdir('./12x4/')
   os.chdir(options.odir)
@@ -392,20 +435,21 @@ def trainCNN(options,args):
     N_verify = 50
 
     input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
+    
     ## csv files for RTL verification
-    np.savetxt("verify_input.csv", input_Q[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
-    np.savetxt("verify_output.csv",cnn_enQ[0:N_verify].reshape(N_verify,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
-    np.savetxt("verify_decoded.csv",cnn_deQ[0:N_verify].reshape(N_verify,48), delimiter=",",fmt='%.12f')
+    N_csv=input_Q.shape[0] # about 80k
+    np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
+    np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
+    np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
 
     index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
-    '''
-    corr_arr, ssd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
+    corr_arr, ssd_arr, emd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
 
-    #hi_corr_index = (np.where(corr_arr>0.9))[0]
-    #low_corr_index = (np.where(corr_arr<0.2))[0]
-    '''
+    hi_corr_index = (np.where(corr_arr>0.9))[0]
+    low_corr_index = (np.where(corr_arr<0.2))[0]
+#    '''
     visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
-    '''
+#    '''
     if len(hi_corr_index)>0:
         index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
         visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
@@ -416,13 +460,14 @@ def trainCNN(options,args):
 
     model['corr'] = np.round(np.mean(corr_arr),3)
     model['ssd'] = np.round(np.mean(ssd_arr),3)
-    '''
+    model['emd'] = np.round(np.mean(emd_arr),3)
+#    '''
     summary = summary.append({'name':model_name,
-                             # 'corr':model['corr'],
-                             # 'ssd':model['ssd'],
+                              'corr':model['corr'],
+                              'ssd':model['ssd'],
+                              'emd':model['emd'],
                               'en_pams' : m_autoCNNen.count_params(),
                               'tot_pams': m_autoCNN.count_params(),
-                             # 'ssd':model['ssd'],
                               },ignore_index=True)
 
     #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
@@ -442,6 +487,7 @@ if __name__== "__main__":
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
     parser.add_option("--qBits", type='int', default = 8, dest="qBits", help="# of bits of precision for the quantized weights of the model, must also speicfy qIntBits")
     parser.add_option("--qIntBits", type='int', default = 0, dest="qIntBits", help="# of bits of precision for the integer portion of the quantized weights during quantization")
+    parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     (options, args) = parser.parse_args()
     trainCNN(options,args)
 
