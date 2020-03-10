@@ -132,9 +132,9 @@ class qDenseCNN:
                            kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
 
 
-        encodedLayer = QDense(encoded_dim, activation='relu', name='encoded_vector',
+        x = QDense(encoded_dim, activation='relu', name='encoded_vector',
                            kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
-        x = QActivation(QA3_param, name='dense_qa')(x)
+        encodedLayer = QActivation(QA3_param, name='dense_qa')(x)
 
         # Instantiate Encoder Model
         self.encoder = Model(inputs, encodedLayer, name='encoder')
