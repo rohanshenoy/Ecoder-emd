@@ -339,7 +339,7 @@ def trainCNN(options,args):
      #                                                       'encoded_dim':10, 'qbits':qBitStr}},
     {'name': '4x4_norm_d10', 'ws': '',
        'pams': {'shape': (4, 4, 3), 'channels_first': False, 'arrange': arrange443, 'encoded_dim': 10,
-                'loss': 'weightedMSE', 'qb_qbits':wb_qbits, 'in_qbits':in_qbits, 'conv_qbits':conv_qbits, 'dense_qbits':dense_qbits}},
+                'loss': 'weightedMSE', 'wb_qbits':wb_qbits, 'in_qbits':in_qbits, 'conv_qbits':conv_qbits, 'dense_qbits':dense_qbits}},
     #{'name':'4x4_norm_d8' ,'ws':'4x4_norm_d8.hdf5' ,'pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
 
     #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
