@@ -254,10 +254,10 @@ def trainCNN(options,args):
 
   qBits = options.qBits
   qIntBits = options.qIntBits
-  wb_qbits = {'bits':qBits,'integer':qIntBits}
-  in_qbits = {'bits': 32, 'integer': 8}
-  conv_qbits = {'bits': 32, 'integer': 8}
-  dense_qbits = {'bits': 32, 'integer': 8}
+  wb_qbits = {'bits':32,'integer':1}
+  in_qbits = {'bits': qBits, 'integer': qBits}
+  conv_qbits = {'bits': 32, 'integer': 1}
+  dense_qbits = {'bits': 32, 'integer': 1}
   qBitStr = "(bits="+str(options.qBits)+",integer="+str(options.qIntBits)+",keep_negative=1)"
   act_bits = options.qBits #currently the quantized bits for activation functions are just being set equal to total quantized bits, investigate if it shouldn't be?
 
@@ -427,8 +427,10 @@ def trainCNN(options,args):
     m.init()
     shaped_data                = m.prepInput(normdata)
     val_input, train_input     = split(shaped_data)
+    print("Sample data: " + str(train_input[0]))  # verify that the data is normalized correctly
+    print("Sample data: " + str(train_input[1]))
+    print("Sample data: " + str(train_input[2]))
     m_autoCNN , m_autoCNNen    = m.get_models()
-
     if model['ws']=='':
       history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
     else:
@@ -479,6 +481,7 @@ def trainCNN(options,args):
 
     os.chdir('../')
   print(summary)
+  return summary
 
 
 if __name__== "__main__":
@@ -492,6 +495,14 @@ if __name__== "__main__":
     parser.add_option("--qIntBits", type='int', default = 0, dest="qIntBits", help="# of bits of precision for the integer portion of the quantized weights during quantization")
     parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     (options, args) = parser.parse_args()
-    trainCNN(options,args)
-
+    emd_arr = []
+    bits_arr = []
+    for bits in range(4,17):
+        bits_arr.append(bits)
+        options.qBits = bits
+        options.qIntBits = 1
+        model_info = trainCNN(options,args)
+        emd_arr.append(model_info['emd'])
+    plt.plot(bits_arr,emd_arr)
+    plt.savefig("emd_vs_bits_input.png")
 
