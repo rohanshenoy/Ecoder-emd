@@ -2,7 +2,6 @@ import numpy as np
 import tensorflow as tf
 import pandas as pd
 import optparse
-import shutil
 from tensorflow.python.client import device_lib
 from tensorflow import keras as kr
 import os
@@ -17,11 +16,15 @@ from qDenseCNN import qDenseCNN
 import ot
 
 @numba.jit
-def normalize(data):
+def normalize(data,rescaleInputToMax=False):
     norm =[]
     for i in range(len(data)):
-        norm.append( data[i].sum() )
-        data[i] = 1.*data[i]/data[i].sum()
+        if rescaleInputToMax:
+            norm.append( data[i].max() )
+            data[i] = 1.*data[i]/data[i].max()
+        else:
+            norm.append( data[i].sum() )
+            data[i] = 1.*data[i]/data[i].sum()
     return data,np.array(norm)
 
 def split(shaped_data, validation_frac=0.2):
@@ -263,7 +266,7 @@ def trainCNN(options,args):
 
 
   data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
-  normdata,maxdata = normalize(data.values.copy())
+  normdata,maxdata = normalize(data.values.copy(),rescaleInputToMax=options.rescaleInputToMax)
 
   arrange8x8 = np.array([
               28,29,30,31,0,4,8,12,
@@ -415,7 +418,6 @@ def trainCNN(options,args):
     if not os.path.exists(model_name):
       os.mkdir(model_name)
     os.chdir(model_name)
-    shutil.copyfile("../../tests/verify_emd.py", "verify_emd.py")
 
     m = qDenseCNN(weights_f=model['ws'])
     m.setpams(model['pams'])
@@ -485,6 +487,7 @@ if __name__== "__main__":
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
     parser.add_option("--qBits", type='int', default = 8, dest="qBits", help="# of bits of precision for the quantized weights of the model, must also speicfy qIntBits")
     parser.add_option("--qIntBits", type='int', default = 0, dest="qIntBits", help="# of bits of precision for the integer portion of the quantized weights during quantization")
+    parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     (options, args) = parser.parse_args()
     trainCNN(options,args)
 
