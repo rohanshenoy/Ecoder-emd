@@ -96,12 +96,18 @@ class qDenseCNN:
 
         inputs = Input(shape=self.pams['shape'])  # adapt this if using `channels_first` image data format
 
-        qbits = self.pams['qbits'] # Quantization precision parameters
+        qbits = self.pams['wb_qbits'] # Quantization precision parameters
+        QA1 = self.pams['in_qbits']
+        QA2 = self.pams['conv_qbits']
+        QA3 = self.pams['dense_qbits']
         #qbits_param - quantizer to pass to QKeras layers, used for both kernel and bias
         qbits_param = qkr.quantized_bits(bits=qbits['bits'],integer=qbits['integer'],keep_negative=1)
+        QA1_param = qkr.quantized_bits(bits=QA1['bits'], integer=QA1['integer'], keep_negative=1)
+        QA2_param = qkr.quantized_bits(bits=QA2['bits'], integer=QA2['integer'], keep_negative=1)
+        QA3_param = qkr.quantized_bits(bits=QA3['bits'], integer=QA3['integer'], keep_negative=1)
 
         x = inputs
-
+        x = QActivation(QA1_param, name='input_qa')(x)
         for i, n_nodes in enumerate(CNN_layer_nodes):
             if channels_first:
                 x = QConv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',
@@ -110,28 +116,25 @@ class qDenseCNN:
             else:
                 x = QConv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same', name="conv2d_"+str(i)+"_m",
                            kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
-            ###en_qdict.update({"conv2d_"+str(i)+"_m":qbits})
             if CNN_pool[i]:
                 if channels_first:
                     x = MaxPooling2D((2, 2), padding='same', data_format='channels_first', name="mp_"+str(i))(x)
                 else:
                     x = MaxPooling2D((2, 2), padding='same', name="mp_"+str(i))(x)
-                #en_qdict.update({"mp_" + str(i): qbits})
 
         shape = K.int_shape(x)
-
+        x = QActivation(QA2_param, name='conv_qa')(x)
         x = Flatten(name="flatten")(x)
-        #en_qdict.update({"flatten": qbits})
 
         # encoder dense nodes
         for i, n_nodes in enumerate(Dense_layer_nodes):
             x = QDense(n_nodes, activation='relu', name="en_dense_"+str(i),
                            kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
-            #en_qdict.update({"en_dense_" + str(i): qbits})
+
 
         encodedLayer = QDense(encoded_dim, activation='relu', name='encoded_vector',
                            kernel_quantizer=qbits_param, bias_quantizer=qbits_param)(x)
-        #en_qdict.update({"encoded_vector": qbits})
+        x = QActivation(QA3_param, name='dense_qa')(x)
 
         # Instantiate Encoder Model
         self.encoder = Model(inputs, encodedLayer, name='encoder')
