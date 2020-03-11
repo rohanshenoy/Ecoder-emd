@@ -253,7 +253,7 @@ def GetBitsString(In, Accum, Weight):
     s += "_Weight{}b{}i".format(Weight['total'],Weight['integer'])
     return s
 
-def trainCNN(options,args):
+def trainCNN(options,args, incr):
 
   # List devices:
   print(device_lib.list_local_devices())
@@ -261,7 +261,10 @@ def trainCNN(options,args):
   print("Is GPU available? ", tf.test.is_gpu_available())
 
   # generic precisions
-  nBits_input  = {'total': 16, 'integer': 6}
+  nb = 4+incr*2
+  print('training with',nb,'input total bits')
+  nBits_input  = {'total': nb, 'integer': 2}
+  #nBits_input  = {'total': 16, 'integer': 6}
   nBits_accum  = {'total': 16, 'integer': 6}
   nBits_weight = {'total': 16, 'integer': 6}
   nBits_encod  = {'total': 16,  'integer': 6}
@@ -485,7 +488,9 @@ def trainCNN(options,args):
         f.write(json.dumps(m.get_pams(),indent=4))
 
     os.chdir('../')
+  os.chdir('../')
   print(summary)
+  return summary
 
 
 if __name__== "__main__":
@@ -499,6 +504,21 @@ if __name__== "__main__":
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     (options, args) = parser.parse_args()
-    trainCNN(options,args)
+    #trainCNN(options,args)
 
 
+    emd_arr = []
+    bits_arr = []
+
+    for i in range(10):
+        model_info = trainCNN(options,args,i)
+        bits_arr.append(4+i*2)
+        emd_arr.append(model_info['emd'])
+    print(bits_arr,emd_arr)
+    plt.plot(bits_arr,emd_arr)
+    plt.title('Scan')
+    plt.ylabel('EMD')
+    plt.xlabel('n bits')
+    plt.legend(['others 16,6'], loc='upper right')
+
+    plt.savefig("emd_vs_bits_input.png")
