@@ -276,6 +276,7 @@ def trainCNN(options,args, incr):
   conv_qbits = nBits_weight
   dense_qbits = nBits_weight
 
+
   # from tensorflow.keras import backend
   # backend.set_image_data_format('channels_first')
 
@@ -439,7 +440,6 @@ def trainCNN(options,args, incr):
     shaped_data                = m.prepInput(normdata)
     val_input, train_input     = split(shaped_data)
     m_autoCNN , m_autoCNNen    = m.get_models()
-
     if model['ws']=='':
       history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
     else:
