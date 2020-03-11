@@ -273,6 +273,7 @@ def trainCNN(options,args):
   conv_qbits = nBits_weight
   dense_qbits = nBits_weight
 
+
   # from tensorflow.keras import backend
   # backend.set_image_data_format('channels_first')
 
@@ -435,8 +436,10 @@ def trainCNN(options,args):
     m.init()
     shaped_data                = m.prepInput(normdata)
     val_input, train_input     = split(shaped_data)
+    print("Sample data: " + str(train_input[0]))  # verify that the data is normalized correctly
+    print("Sample data: " + str(train_input[1]))
+    print("Sample data: " + str(train_input[2]))
     m_autoCNN , m_autoCNNen    = m.get_models()
-
     if model['ws']=='':
       history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
     else:
@@ -486,6 +489,7 @@ def trainCNN(options,args):
 
     os.chdir('../')
   print(summary)
+  return summary
 
 
 if __name__== "__main__":
@@ -499,6 +503,14 @@ if __name__== "__main__":
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     (options, args) = parser.parse_args()
-    trainCNN(options,args)
-
+    emd_arr = []
+    bits_arr = []
+    for bits in range(4,17):
+        bits_arr.append(bits)
+        options.qBits = bits
+        options.qIntBits = 1
+        model_info = trainCNN(options,args)
+        emd_arr.append(model_info['emd'])
+    plt.plot(bits_arr,emd_arr)
+    plt.savefig("emd_vs_bits_input.png")
 
