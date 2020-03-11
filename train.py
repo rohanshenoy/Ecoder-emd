@@ -185,7 +185,7 @@ def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
   plt.tight_layout()
   plt.savefig("%s_examples.png"%name)
  
-def visMetric(input_Q,decoded_Q,maxQ,name): 
+def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False): 
   #plt.show()
   def plothist(y,xlabel,name):
     plt.figure(figsize=(6,4))
@@ -205,6 +205,8 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   cross_corr_arr = np.array([cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
   ssd_arr        = np.array([ssd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
   emd_arr        = np.array([emd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
+
+  if skipPlot: return cross_corr_arr,ssd_arr,emd_arr
 
   plothist(cross_corr_arr,'cross correlation',name+"_corr")
   plothist(ssd_arr,'sum squared difference',name+"_ssd")
@@ -431,7 +433,7 @@ def trainCNN(options,args):
     np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
 
     index = np.random.choice(input_Q.shape[0], Nevents, replace=False)  
-    corr_arr, ssd_arr, emd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
+    corr_arr, ssd_arr, emd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name, skipPlot=options.skipPlot)
 
     if not options.skipPlot:
         hi_corr_index = (np.where(corr_arr>0.9))[0]
