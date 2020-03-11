@@ -5,6 +5,8 @@ import optparse
 from tensorflow.python.client import device_lib
 from tensorflow import keras as kr
 import os
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import numba
@@ -253,7 +255,7 @@ def GetBitsString(In, Accum, Weight):
     s += "_Weight{}b{}i".format(Weight['total'],Weight['integer'])
     return s
 
-def trainCNN(options,args, incr):
+def trainCNN(options,args, pam_updates=None ):
 
   # List devices:
   print(device_lib.list_local_devices())
@@ -261,13 +263,12 @@ def trainCNN(options,args, incr):
   print("Is GPU available? ", tf.test.is_gpu_available())
 
   # generic precisions
-  nb = 4+incr*2
-  print('training with',nb,'input total bits')
-  nBits_input  = {'total': nb, 'integer': 2}
-  #nBits_input  = {'total': 16, 'integer': 6}
+  #nb = 4+incr*2
+  #print('training with',nb,'input total bits')
+  nBits_input  = {'total': 16, 'integer': 6}
   nBits_accum  = {'total': 16, 'integer': 6}
   nBits_weight = {'total': 16, 'integer': 6}
-  nBits_encod  = {'total': 16,  'integer': 6}
+  nBits_encod  = {'total': 16, 'integer': 6}
   # nBits_input  = {'total': 32, 'integer': 8}
   # nBits_accum  = {'total': 32, 'integer': 8}
   # nBits_weight = {'total': 32, 'integer': 8}
@@ -424,6 +425,11 @@ def trainCNN(options,args, incr):
 
   ]
 
+  if pam_updates:
+      for m in models:
+          m['pams'].update(pam_updates)
+          print ('updated model',m)
+
   summary = pd.DataFrame(columns=['name','en_pams','tot_pams','corr','ssd','emd'])
   #os.chdir('./CNN/')
   #os.chdir('./12x4/')
@@ -474,7 +480,7 @@ def trainCNN(options,args, incr):
     model['corr'] = np.round(np.mean(corr_arr),3)
     model['ssd'] = np.round(np.mean(ssd_arr),3)
     model['emd'] = np.round(np.mean(emd_arr),3)
-
+    toRet = np.round(np.mean(emd_arr),3), np.round(np.std(emd_arr),3)
     summary = summary.append({'name':model_name,
                               'corr':model['corr'],
                               'ssd':model['ssd'],
@@ -490,8 +496,42 @@ def trainCNN(options,args, incr):
     os.chdir('../')
   os.chdir('../')
   print(summary)
-  return summary
+  return toRet
 
+def BitScan(options, args):
+    def plotScan(x,y,ye, name):
+        plt.figure()
+        plt.errorbar(x,y,ye)
+        plt.title('Scan')
+        plt.ylabel('EMD')
+        plt.xlabel('n bits')
+        plt.legend(['others 16,6'], loc='upper right')
+        plt.savefig(name+".png")
+        print(x,y,ye)
+        np.savetxt(name+".csv", np.array([x,y,ye]), delimiter=",",fmt='%.12f')
+
+    # Set default parameters
+    nBits_input  = {'total': 16, 'integer': 6}
+    nBits_accum  = {'total': 16, 'integer': 6}
+    nBits_weight = {'total': 16, 'integer': 6}
+    nBits_encod  = {'total': 16,  'integer': 6}
+    d = {'nBits_weight':nBits_weight, 'nBits_input':nBits_input, 'nBits_accum':nBits_accum, 'nBits_encod': nBits_encod}
+
+    # test inputs
+    bits = [i+4 for i in range(8)]
+    updates = [{'nBits_input':{'total': b, 'integer': 2}} for b in bits]
+    emd, emde = zip(*[trainCNN(options,args,u) for u in updates])
+    plotScan(bits,emd,emde,"test_input_bits")
+
+    # test weights
+    bits = [i+1 for i in range(8)]
+    updates = [{'nBits_weight':{'total': 2*i+1, 'integer': i}} for b in bits]
+    emd, emde = zip(*[trainCNN(options,args,u) for u in updates])
+    plotScan(bits,emd,emde,"test_weight_bits")
+
+    exit(0)
+
+    
 
 if __name__== "__main__":
 
@@ -505,20 +545,4 @@ if __name__== "__main__":
     parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     (options, args) = parser.parse_args()
     #trainCNN(options,args)
-
-
-    emd_arr = []
-    bits_arr = []
-
-    for i in range(10):
-        model_info = trainCNN(options,args,i)
-        bits_arr.append(4+i*2)
-        emd_arr.append(model_info['emd'])
-    print(bits_arr,emd_arr)
-    plt.plot(bits_arr,emd_arr)
-    plt.title('Scan')
-    plt.ylabel('EMD')
-    plt.xlabel('n bits')
-    plt.legend(['others 16,6'], loc='upper right')
-
-    plt.savefig("emd_vs_bits_input.png")
+    BitScan(options,args)
