@@ -184,7 +184,7 @@ def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
   plt.tight_layout()
   plt.savefig("%s_examples.png"%name)
  
-def visMetric(input_Q,decoded_Q,maxQ,name): 
+def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False): 
   #plt.show()
   def plothist(y,xlabel,name):
     plt.figure(figsize=(6,4))
@@ -204,6 +204,8 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
   cross_corr_arr = np.array([cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
   ssd_arr        = np.array([ssd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
   emd_arr        = np.array([emd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
+
+  if skipPlot: return cross_corr_arr,ssd_arr,emd_arr
 
   plothist(cross_corr_arr,'cross correlation',name+"_corr")
   plothist(ssd_arr,'sum squared difference',name+"_ssd")
@@ -244,6 +246,12 @@ def visMetric(input_Q,decoded_Q,maxQ,name):
 
   return cross_corr_arr,ssd_arr,emd_arr
 
+def GetBitsString(In, Accum, Weight):
+    s=""
+    s += "Input{}b{}i".format(In['total'],In['integer'])
+    s += "_Accum{}b{}i".format(Accum['total'],Accum['integer'])
+    s += "_Weight{}b{}i".format(Weight['total'],Weight['integer'])
+    return s
 
 def trainCNN(options,args):
 
@@ -252,21 +260,17 @@ def trainCNN(options,args):
   print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
   print("Is GPU available? ", tf.test.is_gpu_available())
 
-  qBits = options.qBits
-  qIntBits = options.qIntBits
-  wb_qbits = {'bits':qBits,'integer':qIntBits}
-  in_qbits = {'bits': 32, 'integer': 8}
-  conv_qbits = {'bits': 32, 'integer': 8}
-  dense_qbits = {'bits': 32, 'integer': 8}
-  qBitStr = "(bits="+str(options.qBits)+",integer="+str(options.qIntBits)+",keep_negative=1)"
-  act_bits = options.qBits #currently the quantized bits for activation functions are just being set equal to total quantized bits, investigate if it shouldn't be?
-
-
+  # generic precisions
+  nBits_input  = {'total': 32, 'integer': 8}
+  nBits_accum  = {'total': 32, 'integer': 8}
+  nBits_weight = {'total': 32, 'integer': 8}
+  nBits_encod  = {'total': 6,  'integer': 2}
+  # model-dependent -- use common weights unless overridden
+  conv_qbits = nBits_weight
+  dense_qbits = nBits_weight
 
   # from tensorflow.keras import backend
   # backend.set_image_data_format('channels_first')
-
-
 
   data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
   normdata,maxdata = normalize(data.values.copy(),rescaleInputToMax=options.rescaleInputToMax)
@@ -339,7 +343,7 @@ def trainCNN(options,args):
      #                                                       'encoded_dim':10, 'qbits':qBitStr}},
     {'name': '4x4_norm_d10', 'ws': '',
        'pams': {'shape': (4, 4, 3), 'channels_first': False, 'arrange': arrange443, 'encoded_dim': 10,
-                'loss': 'weightedMSE', 'wb_qbits':wb_qbits, 'in_qbits':in_qbits, 'conv_qbits':conv_qbits, 'dense_qbits':dense_qbits}},
+                'loss': 'weightedMSE', 'nBits_weight':nBits_weight, 'nBits_input':nBits_input, 'nBits_accum':nBits_accum, 'nBits_encod': nBits_encod}},
     #{'name':'4x4_norm_d8' ,'ws':'4x4_norm_d8.hdf5' ,'pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
 
     #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
@@ -417,7 +421,7 @@ def trainCNN(options,args):
   #os.chdir('./12x4/')
   os.chdir(options.odir)
   for model in models:
-    model_name = model['name'] + "_quant_" + str(qBits) + "b_" + str(qIntBits) + "b-int"
+    model_name = model['name'] + "_" + GetBitsString(nBits_input,nBits_accum,nBits_weight)
     if not os.path.exists(model_name):
       os.mkdir(model_name)
     os.chdir(model_name)
@@ -440,31 +444,30 @@ def trainCNN(options,args):
     input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
     
     ## csv files for RTL verification
-    N_csv=input_Q.shape[0] # about 80k
+    N_csv= (options.nCSV if options.nCSV>=0 else input_Q.shape[0]) # about 80k
     np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
     np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
     np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
 
     index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
-    corr_arr, ssd_arr, emd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name)
+    corr_arr, ssd_arr, emd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name, skipPlot=options.skipPlot)
 
-    hi_corr_index = (np.where(corr_arr>0.9))[0]
-    low_corr_index = (np.where(corr_arr<0.2))[0]
-#    '''
-    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
-#    '''
-    if len(hi_corr_index)>0:
-        index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
-        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
-    
-    if len(low_corr_index)>0:
-        index = np.random.choice(low_corr_index,min(Nevents,len(low_corr_index)), replace=False)  
-        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
+    if not options.skipPlot:
+        hi_corr_index = (np.where(corr_arr>0.9))[0]
+        low_corr_index = (np.where(corr_arr<0.2))[0]
+        visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
+        if len(hi_corr_index)>0:
+            index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
+            visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
+        
+        if len(low_corr_index)>0:
+            index = np.random.choice(low_corr_index,min(Nevents,len(low_corr_index)), replace=False)  
+            visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
 
     model['corr'] = np.round(np.mean(corr_arr),3)
     model['ssd'] = np.round(np.mean(ssd_arr),3)
     model['emd'] = np.round(np.mean(emd_arr),3)
-#    '''
+
     summary = summary.append({'name':model_name,
                               'corr':model['corr'],
                               'ssd':model['ssd'],
@@ -488,8 +491,8 @@ if __name__== "__main__":
     parser.add_option('-i',"--inputFile", type="string", default = 'CALQ_output_10x.csv',dest="inputFile", help="input TSG ntuple")
     parser.add_option("--dryRun", action='store_true', default = False,dest="dryRun", help="dryRun")
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
-    parser.add_option("--qBits", type='int', default = 8, dest="qBits", help="# of bits of precision for the quantized weights of the model, must also speicfy qIntBits")
-    parser.add_option("--qIntBits", type='int', default = 0, dest="qIntBits", help="# of bits of precision for the integer portion of the quantized weights during quantization")
+    parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
+    parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     (options, args) = parser.parse_args()
     trainCNN(options,args)
