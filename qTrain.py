@@ -261,10 +261,14 @@ def trainCNN(options,args):
   print("Is GPU available? ", tf.test.is_gpu_available())
 
   # generic precisions
-  nBits_input  = {'total': 32, 'integer': 8}
-  nBits_accum  = {'total': 32, 'integer': 8}
-  nBits_weight = {'total': 32, 'integer': 8}
-  nBits_encod  = {'total': 6,  'integer': 2}
+  nBits_input  = {'total': 16, 'integer': 6}
+  nBits_accum  = {'total': 16, 'integer': 6}
+  nBits_weight = {'total': 16, 'integer': 6}
+  nBits_encod  = {'total': 16,  'integer': 6}
+  # nBits_input  = {'total': 32, 'integer': 8}
+  # nBits_accum  = {'total': 32, 'integer': 8}
+  # nBits_weight = {'total': 32, 'integer': 8}
+  # nBits_encod  = {'total': 6,  'integer': 2}
   # model-dependent -- use common weights unless overridden
   conv_qbits = nBits_weight
   dense_qbits = nBits_weight
