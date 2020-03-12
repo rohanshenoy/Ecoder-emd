@@ -24,6 +24,7 @@ def plotScan(x,outs,name,odir,xtitle="n bits"):
     for metric in ['ssd','corr','emd']:
         plotHist(x, outs[metric], outs[metric+'_err'], name+"_"+metric,
                  odir,xtitle=xtitle,ytitle=metric)
+    outs.to_csv(odir+"/"+name+".csv")
     return
 
 def BitScan(options, args):
