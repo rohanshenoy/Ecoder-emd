@@ -106,8 +106,9 @@ def predict(x,autoencoder,encoder,reshape=True):
 ### cross correlation of input/output 
 def cross_corr(x,y):
     cov = np.cov(x.flatten(),y.flatten())
-    std = np.sqrt(np.diag(cov)+1e-10)
-    corr = cov / np.multiply.outer(std, std)
+    std = np.sqrt(np.diag(cov))
+    stdsqr = np.multiply.outer(std, std)
+    corr = np.divide(cov, stdsqr, out=np.zeros_like(cov), where=(stdsqr!=0))
     return corr[0,1]
 
 def ssd(x,y):
