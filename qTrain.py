@@ -257,24 +257,18 @@ def GetBitsString(In, Accum, Weight):
     s += "_Weight{}b{}i".format(Weight['total'],Weight['integer'])
     return s
 
-def trainCNN(options,args, pam_updates=None ):
+def trainCNN(options, args, pam_updates=None):
 
   # List devices:
   print(device_lib.list_local_devices())
   print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
   print("Is GPU available? ", tf.test.is_gpu_available())
 
-  # generic precisions
-  #nb = 4+incr*2
-  #print('training with',nb,'input total bits')
+  # default precisions for quantized training
   nBits_input  = {'total': 16, 'integer': 6}
   nBits_accum  = {'total': 16, 'integer': 6}
   nBits_weight = {'total': 16, 'integer': 6}
   nBits_encod  = {'total': 16, 'integer': 6}
-  # nBits_input  = {'total': 32, 'integer': 8}
-  # nBits_accum  = {'total': 32, 'integer': 8}
-  # nBits_weight = {'total': 32, 'integer': 8}
-  # nBits_encod  = {'total': 6,  'integer': 2}
   # model-dependent -- use common weights unless overridden
   conv_qbits = nBits_weight
   dense_qbits = nBits_weight
@@ -324,23 +318,13 @@ def trainCNN(options,args, pam_updates=None ):
                         15,31, 47])
 
   models = [
-  #    {'name': '4x4_norm_d10', 'ws': '',
-  #      'pams': {'shape': (4, 4, 3), 
-  #               'channels_first': False,
-  #               'arrange': arrange443, 
-  #               'encoded_dim': 10, 
-  #               'loss': 'weightedMSE'}
-  # },
-    {'name': '4x4_norm_d10', 'ws': '',
-       'pams': {'shape': (4, 4, 3),
+     {'name': '4x4_norm_d10', 'ws': '',
+       'pams': {'shape': (4, 4, 3), 
                 'channels_first': False,
-                'arrange': arrange443,
-                'encoded_dim': 10,
-                'loss': 'weightedMSE',
-                'nBits_weight':nBits_weight,
-                'nBits_input':nBits_input,
-                'nBits_accum':nBits_accum,
-                'nBits_encod': nBits_encod}},
+                'arrange': arrange443, 
+                'encoded_dim': 10, 
+                'loss': 'weightedMSE'}
+  },
 
 
     #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },
@@ -443,22 +427,36 @@ def trainCNN(options,args, pam_updates=None ):
 
   ]
 
-  if pam_updates:
-      for m in models:
+  for m in models:
+      if options.quantize:
+          m['pams'].update({
+              'nBits_weight':nBits_weight,
+              'nBits_input':nBits_input,
+              'nBits_accum':nBits_accum,
+              'nBits_encod': nBits_encod})
+      if pam_updates:
           m['pams'].update(pam_updates)
-          print ('updated model',m)
+          print ('updated parameters for model',m['name'])
 
-  summary = pd.DataFrame(columns=['name','en_pams','tot_pams','corr','ssd','emd'])
+  summary = pd.DataFrame(columns=['name','en_pams','tot_pams',
+                                  'corr','ssd','emd',
+                                  'corr_err','ssd_err','emd_err',])
   #os.chdir('./CNN/')
   #os.chdir('./12x4/')
+  if not os.path.exists(options.odir):
+    os.mkdir(options.odir)
   os.chdir(options.odir)
   for model in models:
-    model_name = model['name'] + "_" + GetBitsString(nBits_input,nBits_accum,nBits_weight)
+    model_name = model['name']
+    if options.quantize: model_name += "_" + GetBitsString(nBits_input,nBits_accum,nBits_weight)
     if not os.path.exists(model_name):
       os.mkdir(model_name)
     os.chdir(model_name)
 
-    m = qDenseCNN(weights_f=model['ws'])
+    if options.quantize:
+        m = qDenseCNN(weights_f=model['ws'])
+    else:
+        m = denseCNN(weights_f=model['ws'])
     m.setpams(model['pams'])
     m.init()
     shaped_data                = m.prepInput(normdata)
@@ -495,19 +493,24 @@ def trainCNN(options,args, pam_updates=None ):
             index = np.random.choice(low_corr_index,min(Nevents,len(low_corr_index)), replace=False)  
             visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
 
-    model['corr'] = np.round(np.mean(corr_arr),3)
-    model['ssd'] = np.round(np.mean(ssd_arr),3)
-    model['emd'] = np.round(np.mean(emd_arr),3)
-    toRet = np.round(np.mean(emd_arr),3), np.round(np.std(emd_arr),3)
+    model['corr']     = np.round(np.mean(corr_arr),3)
+    model['ssd']      = np.round(np.mean(ssd_arr),3)
+    model['emd']      = np.round(np.mean(emd_arr),3)
+    model['corr_err'] = np.round(np.std(corr_arr),3)
+    model['ssd_err']  = np.round(np.std(ssd_arr),3)
+    model['emd_err']  = np.round(np.std(emd_arr),3)
+
     summary = summary.append({'name':model_name,
                               'corr':model['corr'],
                               'ssd':model['ssd'],
                               'emd':model['emd'],
+                              'corr_err':model['corr_err'],
+                              'ssd_err':model['ssd_err'],
+                              'emd_err':model['emd_err'],
                               'en_pams' : m_autoCNNen.count_params(),
                               'tot_pams': m_autoCNN.count_params(),
                               },ignore_index=True)
 
-    #print('CNN ssd: ' ,np.round(SSD(input_Q,cnn_deQ),3))
     with open(model_name+"_pams.json",'w') as f:
         f.write(json.dumps(m.get_pams(),indent=4))
 
@@ -537,9 +540,13 @@ def BitScan(options, args):
 
     # test inputs
     bits = [i+3 for i in range(6)]
+    bits = [3]
     updates = [{'nBits_input':{'total': b, 'integer': 2}} for b in bits]
-    emd, emde = zip(*[trainCNN(options,args,u) for u in updates])
-    plotScan(bits,emd,emde,"test_input_bits")
+    outputs = [trainCNN(options,args,u) for u in updates]
+    #emd, emde = zip(*[trainCNN(options,args,u) for u in updates])
+    #plotScan(bits,emd,emde,"test_input_bits")
+
+    exit(0)
 
     # test weights
     bits = [i+1 for i in range(8)]
@@ -556,6 +563,7 @@ if __name__== "__main__":
     parser = optparse.OptionParser()
     parser.add_option('-o',"--odir", type="string", default = 'CNN/',dest="odir", help="input TSG ntuple")
     parser.add_option('-i',"--inputFile", type="string", default = 'CALQ_output_10x.csv',dest="inputFile", help="input TSG ntuple")
+    parser.add_option("--quantize", action='store_true', default = False,dest="quantize", help="quantize the model with qKeras")
     parser.add_option("--dryRun", action='store_true', default = False,dest="dryRun", help="dryRun")
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
     parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
