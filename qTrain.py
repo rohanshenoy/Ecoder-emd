@@ -4,6 +4,7 @@ import pandas as pd
 import optparse
 from tensorflow.python.client import device_lib
 from tensorflow import keras as kr
+from tensorflow.keras import losses
 import os
 import matplotlib
 matplotlib.use('Agg')
@@ -12,7 +13,9 @@ import matplotlib.pyplot as plt
 import numba
 import json
 
+#from models import *
 from qDenseCNN import qDenseCNN
+from denseCNN import denseCNN
 
 #for earth movers distance calculation
 import ot
@@ -103,7 +106,6 @@ def predict(x,autoencoder,encoder,reshape=True):
 def cross_corr(x,y):
     cov = np.cov(x.flatten(),y.flatten())
     std = np.sqrt(np.diag(cov)+1e-10)
-    #std = np.sqrt(np.diag(cov)+(1e-10 * np.ones_like(cov)))
     corr = cov / np.multiply.outer(std, std)
     return corr[0,1]
 
@@ -322,6 +324,25 @@ def trainCNN(options,args, pam_updates=None ):
                         15,31, 47])
 
   models = [
+  #    {'name': '4x4_norm_d10', 'ws': '',
+  #      'pams': {'shape': (4, 4, 3), 
+  #               'channels_first': False,
+  #               'arrange': arrange443, 
+  #               'encoded_dim': 10, 
+  #               'loss': 'weightedMSE'}
+  # },
+    {'name': '4x4_norm_d10', 'ws': '',
+       'pams': {'shape': (4, 4, 3),
+                'channels_first': False,
+                'arrange': arrange443,
+                'encoded_dim': 10,
+                'loss': 'weightedMSE',
+                'nBits_weight':nBits_weight,
+                'nBits_input':nBits_input,
+                'nBits_accum':nBits_accum,
+                'nBits_encod': nBits_encod}},
+
+
     #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },
     #{'name':'denseCNN_2',  'ws':'denseCNN_2.hdf5',
     #  'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask  } },
@@ -350,9 +371,6 @@ def trainCNN(options,args, pam_updates=None ):
     #{'name':'4x4_norm'    ,'ws':'4x4_norm.hdf5'    ,'pams':{'shape':(3,4,4) ,'channels_first':True }},
     #{'name':'4x4_norm_d10','ws':'4x4_norm_d10.hdf5','pams':{'shape':(3,4,4) ,'channels_first':False ,
      #                                                       'encoded_dim':10, 'qbits':qBitStr}},
-    {'name': '4x4_norm_d10', 'ws': '',
-       'pams': {'shape': (4, 4, 3), 'channels_first': False, 'arrange': arrange443, 'encoded_dim': 10,
-                'loss': 'weightedMSE', 'nBits_weight':nBits_weight, 'nBits_input':nBits_input, 'nBits_accum':nBits_accum, 'nBits_encod': nBits_encod}},
     #{'name':'4x4_norm_d8' ,'ws':'4x4_norm_d8.hdf5' ,'pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
 
     #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
@@ -496,7 +514,7 @@ def trainCNN(options,args, pam_updates=None ):
     os.chdir('../')
   os.chdir('../')
   print(summary)
-  return toRet
+  return summary
 
 def BitScan(options, args):
     def plotScan(x,y,ye, name):
@@ -518,14 +536,14 @@ def BitScan(options, args):
     d = {'nBits_weight':nBits_weight, 'nBits_input':nBits_input, 'nBits_accum':nBits_accum, 'nBits_encod': nBits_encod}
 
     # test inputs
-    bits = [i+4 for i in range(8)]
+    bits = [i+3 for i in range(6)]
     updates = [{'nBits_input':{'total': b, 'integer': 2}} for b in bits]
     emd, emde = zip(*[trainCNN(options,args,u) for u in updates])
     plotScan(bits,emd,emde,"test_input_bits")
 
     # test weights
     bits = [i+1 for i in range(8)]
-    updates = [{'nBits_weight':{'total': 2*i+1, 'integer': i}} for b in bits]
+    updates = [{'nBits_weight':{'total': 2*b+1, 'integer': b}} for b in bits]
     emd, emde = zip(*[trainCNN(options,args,u) for u in updates])
     plotScan(bits,emd,emde,"test_weight_bits")
 
