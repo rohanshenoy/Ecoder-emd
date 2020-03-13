@@ -47,7 +47,7 @@ def split(shaped_data, validation_frac=0.2):
     print('training shape',train_input.shape)
     print('validation shape',val_input.shape)
 
-    return val_input,train_input
+    return val_input,train_input,val_indices
 
 def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
 
@@ -67,7 +67,7 @@ def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
     plt.xlabel('Epoch')
     plt.legend(['Train', 'Test'], loc='upper right')
     plt.savefig("history_%s.png"%name)
-    #plt.show()
+    plt.close()
 
     save_models(autoencoder,name)
 
@@ -147,6 +147,38 @@ def emd(_x, _y, threshold=-1):
 
     return ot.emd2(x, y, hexMetric)
 
+def d_weighted_mean(x, y):
+    x = 1./x.sum()*x.flatten()
+    y = 1./y.sum()*y.flatten()
+    dx = hexCoords[:,0].dot(x-y)
+    dy = hexCoords[:,1].dot(x-y)
+    return np.sqrt(dx*dx+dy*dy)
+
+def make_supercells(_x):
+    shape = _x.shape
+    x = _x.copy().flatten()
+    mask = np.array([
+        [ 0,  1,  4,  5], #indices for 1 supercell
+        [ 2,  3,  6,  7],
+        [ 8,  9, 12, 13],
+        [10, 11, 14, 15],
+        [16, 17, 20, 21],
+        [18, 19, 22, 23],
+        [24, 25, 28, 29],
+        [26, 27, 30, 31],
+        [24, 25, 28, 29],
+        [26, 27, 30, 31],
+        [32, 33, 36, 37],
+        [34, 35, 38, 39]])
+    for sc in mask:
+        # set max cell to sum
+        ii = np.argmax( x[sc] )
+        mysum = np.sum( x[sc] )
+        x[sc]=0
+        x[ii]=mysum
+    return x
+
+
 def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
     if index.size==0:
         Nevents=8
@@ -185,6 +217,7 @@ def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
             
     plt.tight_layout()
     plt.savefig("%s_examples.png"%name)
+    plt.close()
     
 def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False): 
     def plothist(y,xlabel,name):
@@ -199,7 +232,9 @@ def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False):
         plt.ylabel('Entry')
         plt.title('%s on validation set'%xlabel)
         plt.savefig("hist_%s.png"%name)
-
+        plt.close()
+    
+    metrics = [cross_corr,ssd,emd,d_weighted_mean]
     cross_corr_arr = np.array([cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
     ssd_arr        = np.array([ssd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
     emd_arr        = np.array([emd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
@@ -216,7 +251,8 @@ def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False):
     plt.legend(loc='upper right')
     plt.xlabel('Charge fraction')
     plt.savefig("hist_Qfr_%s.png"%name)
-  
+    plt.close()
+
     input_Q_abs   = np.array([input_Q[i] * maxQ[i] for i in range(0,len(input_Q))])
     decoded_Q_abs = np.array([decoded_Q[i]*maxQ[i] for i in range(0,len(decoded_Q))])
   
@@ -226,6 +262,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False):
     plt.legend(loc='upper right')
     plt.xlabel('Charge')
     plt.savefig("hist_Qabs_%s.png"%name)
+    plt.close()
   
     nonzeroQs = np.count_nonzero(input_Q_abs.reshape(len(input_Q_abs),48),axis=1)
     occbins = [0,5,10,20,48]
@@ -242,7 +279,8 @@ def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False):
         plt.tight_layout()
         #plt.show()
         plt.savefig('corr_vs_occ_%s.png'%name)
-  
+        plt.close()
+
     return cross_corr_arr,ssd_arr,emd_arr
   
 def GetBitsString(In, Accum, Weight):
@@ -452,9 +490,12 @@ def trainCNN(options, args, pam_updates=None):
             m = denseCNN(weights_f=model['ws'])
         m.setpams(model['pams'])
         m.init()
-        shaped_data                = m.prepInput(normdata)
-        val_input, train_input     = split(shaped_data)
-        m_autoCNN , m_autoCNNen    = m.get_models()
+        shaped_data                     = m.prepInput(normdata)
+        val_input, train_input, val_ind = split(shaped_data)
+        m_autoCNN , m_autoCNNen         = m.get_models()
+        maxdata.reshape(shaped_data.shape)
+        val_max = maxdata[val_ind]
+        
         if model['ws']=='':
             history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
         else:
@@ -472,7 +513,26 @@ def trainCNN(options, args, pam_updates=None):
         np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
         
         index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
-        corr_arr, ssd_arr, emd_arr  = visMetric(input_Q,cnn_deQ,maxdata,name=model_name, skipPlot=options.skipPlot)
+        
+        # metrics to compute on the validation dataset
+        metrics = {'xcorr':cross_corr,
+                   'ssd':ssd,
+                   'emd':emd,
+                   'wgtd_mean':d_weighted_mean,
+               }
+        #super-cell variants
+        sc_metrics = {'sc_'+n : (lambda x,y : f[n](make_supercells(x),make_supercells(y))) for n in metrics}
+        # threshold variants
+        for pct in [47,69]:
+            thr_metrics = {'thr{}_'.format(pct)+n : (lambda x,y : f[n](threshold(x,val_max,pct),threshold(y,val_max,pct))) for n in metrics}
+        all_metrics = metrics.update(sc_metrics)
+        metric_arrays={}
+        for name in all_metrics:
+            func = all_metrics[name]
+            metric_arrays[name] = np.array([func(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))])
+
+        
+        corr_arr, ssd_arr, emd_arr = visMetric(input_Q,cnn_deQ,val_max,name=model_name, skipPlot=options.skipPlot)
         
         if not options.skipPlot:
             hi_corr_index = (np.where(corr_arr>0.9))[0]

@@ -29,23 +29,26 @@ def plotScan(x,outs,name,odir,xtitle="n bits"):
 
 def BitScan(options, args):
 
-    # test inputs
-    bits = [i+3 for i in range(6)]
-    bits = [i+3 for i in range(2)]
-    updates = [{'nBits_input':{'total': b, 'integer': 2}} for b in bits]
-    outputs = [trainCNN(options,args,u) for u in updates]
-    plotScan(bits,outputs,"test_input_bits",options.odir,xtitle="total input bits")
+    if False:
+        # test inputs
+        bits = [i+3 for i in range(6)]
+        updates = [{'nBits_input':{'total': b, 'integer': 2}} for b in bits]
+        outputs = [trainCNN(options,args,u) for u in updates]
+        plotScan(bits,outputs,"test_input_bits",options.odir,xtitle="total input bits")
+    
+    if False:
+        # test weights
+        bits = [i+1 for i in range(8)]
+        updates = [{'nBits_weight':{'total': 2*b+1, 'integer': b}} for b in bits]
+        outputs = [trainCNN(options,args,u) for u in updates]
+        plotScan(bits,outputs,"test_weight_bits",options.odir,xtitle="total weight bits")
 
-    exit(0)
-
-    # test weights
-    bits = [i+1 for i in range(8)]
-    updates = [{'nBits_weight':{'total': 2*b+1, 'integer': b}} for b in bits]
-    outputs = [trainCNN(options,args,u) for u in updates]
-    plotScan(bits,outputs,"test_weight_bits",xtitle="total input bits")
-
-    emd, emde = zip(*[trainCNN(options,args,u) for u in updates])
-    plotScan(bits,emd,emde,"test_weight_bits")
+    if True:
+        # test encoded bits
+        bits = [4,6,8,10,12,16]
+        updates = [{'nBits_encod':{'total': b, 'integer': b/2},'encoded_dim':int(64/b)} for b in bits]
+        outputs = [trainCNN(options,args,u) for u in updates]
+        plotScan(bits,outputs,"test_encod_bits",options.odir,xtitle="bits per encoded node")
 
     exit(0)
 
