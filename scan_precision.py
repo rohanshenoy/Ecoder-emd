@@ -17,6 +17,7 @@ def plotHist(x,y,ye, name, odir,xtitle, ytitle):
     plt.xlabel(xtitle)
     plt.legend(['others 16,6'], loc='upper right')
     plt.savefig(odir+"/"+name+".png")
+    plt.close()
     return
 
 def plotScan(x,outs,name,odir,xtitle="n bits"):
@@ -27,7 +28,9 @@ def plotScan(x,outs,name,odir,xtitle="n bits"):
     return
 
 def BitScan(options, args):
-
+    og_odir = options.odir
+    '''
+    options.odir = og_odir+"/input"
     # test inputs
     bits = [i+3 for i in range(6)]
     bits = [i+3 for i in range(2)]
@@ -36,17 +39,52 @@ def BitScan(options, args):
     plotScan(bits,outputs,"test_input_bits",options.odir,xtitle="total input bits")
 
     exit(0)
-
+    '''
+    '''
     # test weights
+    options.odir = og_odir+"/weight"
     bits = [i+1 for i in range(8)]
     updates = [{'nBits_weight':{'total': 2*b+1, 'integer': b}} for b in bits]
     outputs = [trainCNN(options,args,u) for u in updates]
-    plotScan(bits,outputs,"test_weight_bits",xtitle="total input bits")
+    plotScan([2*b+1 for b in bits],outputs,"test_weight_bits",og_odir,xtitle="total weight bits")
+    '''
 
-    emd, emde = zip(*[trainCNN(options,args,u) for u in updates])
-    plotScan(bits,emd,emde,"test_weight_bits")
+    #exit(0)
 
-    exit(0)
+    # test accumulator
+    options.odir = og_odir+"/accum"
+    bits = [i+1 for i in range(8)]
+    updates = [{'nBits_accum': {'total': 2*b+1, 'integer': b}} for b in bits]
+    outputs = [trainCNN(options,args,u) for u in updates]
+    plotScan([2*b+1 for b in bits],outputs,"test_accum_bits",og_odir,xtitle="total accumulator layer bits")
+
+    #exit(0)
+
+    # test encoder layer bits
+    options.odir = og_odir+"/encod"
+    bits = [i+1 for i in range(8)]
+    updates = [{'nBits_encod': {'total': 2*b+1, 'integer': b}} for b in bits]
+    outputs = [trainCNN(options,args,u) for u in updates]
+    plotScan([2*b+1 for b in bits],outputs,"test_encoded_bits",og_odir,xtitle="total encoder layer bits")
+
+    #exit(0)
+
+    #test dense alone (conv constant)
+    options.odir = og_odir+"/dense"
+    bits = [i+1 for i in range(8)]
+    updates = [{'nBits_dense': {'total': 2*b+1, 'integer': b}} for b in bits]
+    outputs = [trainCNN(options,args,u) for u in updates]
+    plotScan([2*b+1 for b in bits],outputs,"test_dense_bits",og_odir,xtitle="total dense layer bits")
+
+
+    #exit(0)
+
+    # test conv alone (dense constant)
+    options.odir = og_odir+"/conv"
+    bits = [i+1 for i in range(8)]
+    updates = [{'nBits_conv': {'total': 2*b+1, 'integer': b}} for b in bits]
+    outputs = [trainCNN(options,args,u) for u in updates]
+    plotScan([2*b+1 for b in bits],outputs,"test_conv_bits",og_odir,xtitle="total convolutional layer bits")
 
     
 

@@ -68,7 +68,7 @@ def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
     plt.legend(['Train', 'Test'], loc='upper right')
     plt.savefig("history_%s.png"%name)
     #plt.show()
-
+    plt.close()
     save_models(autoencoder,name)
 
     return history
@@ -184,6 +184,7 @@ def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
             
     plt.tight_layout()
     plt.savefig("%s_examples.png"%name)
+    plt.close(fig)
     
 def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False): 
     def plothist(y,xlabel,name):
@@ -198,6 +199,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False):
         plt.ylabel('Entry')
         plt.title('%s on validation set'%xlabel)
         plt.savefig("hist_%s.png"%name)
+        plt.close()
 
     cross_corr_arr = np.array([cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
     ssd_arr        = np.array([ssd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
@@ -215,6 +217,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False):
     plt.legend(loc='upper right')
     plt.xlabel('Charge fraction')
     plt.savefig("hist_Qfr_%s.png"%name)
+    plt.close()
   
     input_Q_abs   = np.array([input_Q[i] * maxQ[i] for i in range(0,len(input_Q))])
     decoded_Q_abs = np.array([decoded_Q[i]*maxQ[i] for i in range(0,len(decoded_Q))])
@@ -225,6 +228,7 @@ def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False):
     plt.legend(loc='upper right')
     plt.xlabel('Charge')
     plt.savefig("hist_Qabs_%s.png"%name)
+    plt.close()
   
     nonzeroQs = np.count_nonzero(input_Q_abs.reshape(len(input_Q_abs),48),axis=1)
     occbins = [0,5,10,20,48]
@@ -241,14 +245,26 @@ def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False):
         plt.tight_layout()
         #plt.show()
         plt.savefig('corr_vs_occ_%s.png'%name)
+        plt.close()
   
     return cross_corr_arr,ssd_arr,emd_arr
-  
-def GetBitsString(In, Accum, Weight):
+
+def GetBitsString(In, Accum, Weight, Encoded, Dense=False, Conv=False):
     s=""
     s += "Input{}b{}i".format(In['total'],In['integer'])
     s += "_Accum{}b{}i".format(Accum['total'],Accum['integer'])
-    s += "_Weight{}b{}i".format(Weight['total'],Weight['integer'])
+    if Dense:
+        s += "_Dense{}b{}i".format(Dense['total'], Dense['integer'])
+        if Conv:
+            s += "_Conv{}b{}i".format(Conv['total'], Conv['integer'])
+        else:
+            s += "_Conv{}b{}i".format(Weight['total'], Weight['integer'])
+    elif Conv:
+        s += "_Dense{}b{}i".format(Weight['total'], Weight['integer'])
+        s += "_Conv{}b{}i".format(Conv['total'], Conv['integer'])
+    else:
+        s += "_Weight{}b{}i".format(Weight['total'],Weight['integer'])
+    s += "_Encod{}b{}i".format(Encoded['total'], Encoded['integer'])
     return s
 
 def trainCNN(options, args, pam_updates=None):
@@ -438,9 +454,10 @@ def trainCNN(options, args, pam_updates=None):
     for model in models:
         model_name = model['name']
         if options.quantize: 
-            bit_str = GetBitsString(m['pams']['nBits_input'],
-                                    m['pams']['nBits_accum'],
-                                    m['pams']['nBits_weight'])
+            bit_str = GetBitsString(model['pams']['nBits_input'], model['pams']['nBits_accum'],
+                                    model['pams']['nBits_weight'], model['pams']['nBits_encod'],
+                                    (model['pams']['nBits_dense'] if 'nBits_dense'  in model['pams'] else False),
+                                    (model['pams']['nBits_conv'] if 'nBits_conv' in model['pams'] else False))
             model_name += "_" + bit_str
         if not os.path.exists(model_name): os.mkdir(model_name)
         os.chdir(model_name)
