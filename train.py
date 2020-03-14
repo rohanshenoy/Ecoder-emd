@@ -10,6 +10,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+from util import plotHist,plotHistErr
+
 import numba
 import json
 
@@ -89,19 +91,6 @@ def save_models(autoencoder, name):
                 encoder.save_weights('%s.hdf5'%("encoder_"+name))
                 decoder.save_weights('%s.hdf5'%("decoder_"+name))
                 return
-                
-
-def predict(x,autoencoder,encoder,reshape=True):
-    decoded_Q = autoencoder.predict(x)
-    encoded_Q = encoder.predict(x)
-    
-    #need reshape for CNN layers  
-    if reshape :
-        decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),12,4))
-        encoded_shape = encoded_Q.shape
-        encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),encoded_shape[3],encoded_shape[1]))
-
-    return decoded_Q, encoded_Q
 
 ### cross correlation of input/output 
 def cross_corr(x,y):
@@ -177,7 +166,6 @@ def make_supercells(_x):
         x[sc]=0
         x[ii]=mysum
     return x
-
 def threshold(_x, norm, cut):
     x = _x.copy()
     # reshape to allow broadcasting to all cells
@@ -185,19 +173,13 @@ def threshold(_x, norm, cut):
     x = np.where(x*norm_shape>=cut,x,0)
     return x
 
-def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
-    if index.size==0:
-        Nevents=8
-        #randomly pick Nevents if index is not specified
-        index = np.random.choice(input_Q.shape[0], Nevents, replace=False) 
-    else:
-        Nevents = len(index) 
+def visDisplays(input_Q,decoded_Q,encoded_Q=None,index,name='model_X'):
+    Nevents = len(index)
         
     inputImg    = input_Q[index]
-    encodedImg  = encoded_Q[index]
     outputImg   = decoded_Q[index]
   
-    fig, axs = plt.subplots(3, Nevents, figsize=(16, 10))
+    fig, axs = plt.subplots(2+(encoded_Q!=None), Nevents, figsize=(16, 10))
     
     for i in range(0,Nevents):
         if i==0:
@@ -212,44 +194,24 @@ def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
         else:
             axs[1,i].set(xlabel='cell_x',title='CNN Ouput_%i'%i)
             c1=axs[1,i].imshow(outputImg[i])
-            
-    for i in range(0,Nevents):
-        if i==0:
-            axs[2,i].set(xlabel='latent dim',ylabel='depth',title='Encoded_%i'%i)
-        else:
-            axs[2,i].set(xlabel='latent dim',title='Encoded_%i'%i)
-            c1=axs[2,i].imshow(encodedImg[i])
-            plt.colorbar(c1,ax=axs[2,i])
+
+    if encoded_Q:
+        encodedImg  = encoded_Q[index]
+        for i in range(0,Nevents):
+            if i==0:
+                axs[2,i].set(xlabel='latent dim',ylabel='depth',title='Encoded_%i'%i)
+            else:
+                axs[2,i].set(xlabel='latent dim',title='Encoded_%i'%i)
+                c1=axs[2,i].imshow(encodedImg[i])
+                plt.colorbar(c1,ax=axs[2,i])
             
     plt.tight_layout()
     plt.savefig("%s_examples.png"%name)
     plt.close()
     
-def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False): 
-    def plothist(y,xlabel,name):
-        plt.figure(figsize=(6,4))
-        plt.hist(y,50)
-        mu = np.mean(y)
-        std = np.std(y)
-        ax = plt.axes()
-        plt.text(0.1, 0.9, name,transform=ax.transAxes)
-        plt.text(0.1, 0.8, r'$\mu=%.3f,\ \sigma=%.3f$'%(mu,std),transform=ax.transAxes)
-        plt.xlabel(xlabel)
-        plt.ylabel('Entry')
-        plt.title('%s on validation set'%xlabel)
-        plt.savefig("hist_%s.png"%name)
-        plt.close()
+def visMetric(input_Q,decoded_Q,metric,name,odir,skipPlot=False): 
     
-    metrics = [cross_corr,ssd,emd,d_weighted_mean]
-    cross_corr_arr = np.array([cross_corr(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))]  )
-    ssd_arr        = np.array([ssd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
-    emd_arr        = np.array([emd(decoded_Q[i],input_Q[i]) for i in range(0,len(decoded_Q))])
-  
-    if skipPlot: return cross_corr_arr,ssd_arr,emd_arr
-  
-    plothist(cross_corr_arr,'cross correlation',name+"_corr")
-    plothist(ssd_arr,'sum squared difference',name+"_ssd")
-    plothist(emd_arr,'earth movers distance',name+"_emd")
+    plotHist(vals,name,options.odir,xtitle=longMetric[mname])
   
     plt.figure(figsize=(6,4))
     plt.hist([input_Q.flatten(),decoded_Q.flatten()],20,label=['input','output'])
@@ -261,14 +223,6 @@ def visMetric(input_Q,decoded_Q,maxQ,name, skipPlot=False):
 
     input_Q_abs   = np.array([input_Q[i] * maxQ[i] for i in range(0,len(input_Q))])
     decoded_Q_abs = np.array([decoded_Q[i]*maxQ[i] for i in range(0,len(decoded_Q))])
-  
-    plt.figure(figsize=(6,4))
-    plt.hist([input_Q_abs.flatten(),decoded_Q_abs.flatten()],20,label=['input','output'])
-    plt.yscale('log')
-    plt.legend(loc='upper right')
-    plt.xlabel('Charge')
-    plt.savefig("hist_Qabs_%s.png"%name)
-    plt.close()
   
     nonzeroQs = np.count_nonzero(input_Q_abs.reshape(len(input_Q_abs),48),axis=1)
     occbins = [0,5,10,20,48]
@@ -505,10 +459,7 @@ def trainCNN(options, args, pam_updates=None):
             history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
         else:
             save_models(m_autoCNN,model_name)
-        
-        Nevents = 8
-        N_verify = 50
-        
+                
         input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
         
         ## csv files for RTL verification
@@ -517,63 +468,65 @@ def trainCNN(options, args, pam_updates=None):
         np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
         np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
         
-        index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
-
         stc_Q = make_supercells(input_Q)
-        thr_nom = threshold(input_Q,val_max,47) # 1.35 transverse MIPs
-        thr_hi  = threshold(input_Q,val_max,69) # 2.0  transverse MIPs
-
+        thr_lo_Q = threshold(input_Q,val_max,47) # 1.35 transverse MIPs
+        thr_hi_Q = threshold(input_Q,val_max,69) # 2.0  transverse MIPs
+        occupancy = np.count_nonzero(input_Q.reshape(len(input_Q),48),axis=1)
+        
+        # compression algorithms, autoencoder and more traditional benchmarks
+        alg_outs = {'ae' : cnn_deQ,
+                    'stc': stc_Q,
+                    'thr_lo': thr_lo_Q,
+                    'thr_hi': thr_hi_Q,
+                }
         # metrics to compute on the validation dataset
-        metrics = {'xcorr'    :cross_corr,
-                   'ssd'      :ssd,
-                   'emd'      :emd,
-                   'diff_mean':d_weighted_mean,
+        metrics = {'cross_corr'    :cross_corr,
+                   'SSD'      :ssd,
+                   'EMD'      :emd,
+                   'dMean':d_weighted_mean,
+               }
+        longMetric = {'cross_corr'    :'cross correlation',
+                   'SSD'      :'sum of squared differences',
+                   'EMD'      :'earth movers distance',
+                   'dMean':'difference in energy-weighted mean',
                }
 
-        
+        # to generate event displays 
+        Nevents = 8
+        index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
 
-        # # super trigger cell variants
-        # sc_metrics = {'sc_'+n : (lambda x,y,_=None : (metrics[n])(make_supercells(x),make_supercells(y))) for n in metrics}
-        # # threshold variants
-        # thr_metrics={}
-        # for pct in [47,69]: #1.35 and 2.0 transverse MIPs
-        #     thr_metrics.update({'thr{}_'.format(pct)+n : (lambda x,y,maxVal : (metrics[n])(threshold(x,maxVal,pct),threshold(y,maxVal,pct))) for n in metrics})
-        # all_metrics = metrics.copy()
-        # all_metrics.update(sc_metrics)
-        # all_metrics.update(thr_metrics)
-        # #metric_arrays={name : np.array([(all_metrics[name])(input_Q[i],cnn_deQ[i]) for i in range(0,len(input_Q))]) for name in all_metrics}
-
-        metric_arrays={name : np.array([(all_metrics[name])(input_Q[i],cnn_deQ[i],val_max[i]) for i in range(0,len(input_Q))]) for name in all_metrics}
-
-        corr_arr, ssd_arr, emd_arr = visMetric(input_Q,cnn_deQ,val_max,name=model_name, skipPlot=options.skipPlot)
-
-        if not options.skipPlot:
-            hi_corr_index = (np.where(corr_arr>0.9))[0]
-            low_corr_index = (np.where(corr_arr<0.2))[0]
-            visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
-            if len(hi_corr_index)>0:
-                index = np.random.choice(hi_corr_index, min(Nevents,len(hi_corr_index)), replace=False)  
-                visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.9")
+        # compute metrics for each alg
+        for algname, alg_out in alg_outs.items():
+            # charge fraction comparison
+            plotHist([input_Q.flatten(),alg_out.flatten()],"hist_chargeFrac_"+algname,options.odir,xtitle="charge fraction",ytitle="Cells")
+            # event displays
+            if(not options.skipPlot): visDisplays(input_Q, alg_out, (cnn_enQ if algname=='ae' else None), index, name=algname)
+            for mname, metric in metrics.items():
+                name = mname+"_"+algname
+                vals = [metric(input_Q[i],alg_out[i]) for i in range(0,len(input_Q))]                
+                model[name]        = np.round(np.mean(vals),3)
+                model[name+'_err'] = np.round(np.std(vals),3)
+                if(not options.skipPlot): 
+                    plotHist(vals,"hist_"+name,options.odir,xtitle=longMetric[mname])
+                    sort = np.sort(vals)
+                    hi_index = (np.where(vals>vals.quantile(0.9)))[0]
+                    lo_index = (np.where(vals<vals.quantile(0.2)))[0]
+                    visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
+                    if len(hi_index)>0:
+                        hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)  
+                        visDisplays(input_Q, alg_out, (cnn_enQ if algname=='ae' else None),hi_ index, name=algname)
+                    if len(lo_index)>0:
+                        lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)  
+                        visDisplays(input_Q, alg_out, (cnn_enQ if algname=='ae' else None),lo_ index, name=algname)                        
                 
-            if len(low_corr_index)>0:
-                index = np.random.choice(low_corr_index,min(Nevents,len(low_corr_index)), replace=False)  
-                visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name+"_corr0.2")
-        
-        model['corr']     = np.round(np.mean(corr_arr),3)
-        model['ssd']      = np.round(np.mean(ssd_arr),3)
-        model['emd']      = np.round(np.mean(emd_arr),3)
-        model['corr_err'] = np.round(np.std(corr_arr),3)
-        model['ssd_err']  = np.round(np.std(ssd_arr),3)
-        model['emd_err']  = np.round(np.std(emd_arr),3)
-        
         summary = summary.append(
             {'name':model_name,
-             'corr':model['corr'],
-             'ssd':model['ssd'],
-             'emd':model['emd'],
-             'corr_err':model['corr_err'],
-             'ssd_err':model['ssd_err'],
-             'emd_err':model['emd_err'],
+             # 'corr':model['corr'],
+             # 'ssd':model['ssd'],
+             # 'emd':model['emd'],
+             # 'corr_err':model['corr_err'],
+             # 'ssd_err':model['ssd_err'],
+             # 'emd_err':model['emd_err'],
              'en_pams' : m_autoCNNen.count_params(),
              'tot_pams': m_autoCNN.count_params(),},
             ignore_index=True)

@@ -8,21 +8,12 @@ import matplotlib.pyplot as plt
 import json
 
 from train import trainCNN
-
-def plotHist(x,y,ye, name, odir,xtitle, ytitle):
-    plt.figure()
-    plt.errorbar(x,y,ye)
-    plt.title('')
-    plt.ylabel(ytitle)
-    plt.xlabel(xtitle)
-    plt.legend(['others 16,6'], loc='upper right')
-    plt.savefig(odir+"/"+name+".png")
-    return
+from util import plotGraphErr
 
 def plotScan(x,outs,name,odir,xtitle="n bits"):
     outs = pd.concat(outs)
     for metric in ['ssd','corr','emd']:
-        plotHist(x, outs[metric], outs[metric+'_err'], name+"_"+metric,
+        plotGraphErr(x, outs[metric], outs[metric+'_err'], name+"_"+metric,
                  odir,xtitle=xtitle,ytitle=metric)
     outs.to_csv(odir+"/"+name+".csv")
     return
