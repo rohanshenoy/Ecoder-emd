@@ -36,18 +36,18 @@ def split(shaped_data, validation_frac=0.2):
     N = round(len(shaped_data)*validation_frac)
     
     #randomly select 25% entries
-    index = np.random.choice(shaped_data.shape[0], N, replace=False)  
+    val_index = np.random.choice(shaped_data.shape[0], N, replace=False)  
     #select the indices of the other 75%
     full_index = np.array(range(0,len(shaped_data)))
-    train_index = np.logical_not(np.in1d(full_index,index))
+    train_index = np.logical_not(np.in1d(full_index,val_index))
   
-    val_input = shaped_data[index]
+    val_input = shaped_data[val_index]
     train_input = shaped_data[train_index]
 
     print('training shape',train_input.shape)
     print('validation shape',val_input.shape)
 
-    return val_input,train_input,val_indices
+    return val_input,train_input,val_index
 
 def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
 
@@ -135,8 +135,8 @@ hexMetric = ot.dist(hexCoords, hexCoords, 'euclidean')
 def emd(_x, _y, threshold=-1):    
     x = np.array(_x, dtype=np.float64)
     y = np.array(_y, dtype=np.float64)
-    x = 1./x.sum()*x.flatten()
-    y = 1./y.sum()*y.flatten()
+    x = (1./x.sum() if x.sum() else 1.)*x.flatten()
+    y = (1./y.sum() if y.sum() else 1.)*y.flatten()
 
     if threshold > 0:
         # only keep entries above 2%, e.g.
@@ -148,8 +148,8 @@ def emd(_x, _y, threshold=-1):
     return ot.emd2(x, y, hexMetric)
 
 def d_weighted_mean(x, y):
-    x = 1./x.sum()*x.flatten()
-    y = 1./y.sum()*y.flatten()
+    x = (1./x.sum() if x.sum() else 1.)*x.flatten()
+    y = (1./y.sum() if y.sum() else 1.)*y.flatten()
     dx = hexCoords[:,0].dot(x-y)
     dy = hexCoords[:,1].dot(x-y)
     return np.sqrt(dx*dx+dy*dy)
@@ -178,6 +178,12 @@ def make_supercells(_x):
         x[ii]=mysum
     return x
 
+def threshold(_x, norm, cut):
+    x = _x.copy()
+    # reshape to allow broadcasting to all cells
+    norm_shape = norm.reshape((norm.shape[0],)+(1,)*(x.ndim-1))
+    x = np.where(x*norm_shape>=cut,x,0)
+    return x
 
 def visualize(input_Q,decoded_Q,encoded_Q,index,name='model_X'):
     if index.size==0:
@@ -493,7 +499,6 @@ def trainCNN(options, args, pam_updates=None):
         shaped_data                     = m.prepInput(normdata)
         val_input, train_input, val_ind = split(shaped_data)
         m_autoCNN , m_autoCNNen         = m.get_models()
-        maxdata.reshape(shaped_data.shape)
         val_max = maxdata[val_ind]
         
         if model['ws']=='':
@@ -513,27 +518,35 @@ def trainCNN(options, args, pam_updates=None):
         np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
         
         index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
-        
+
+        stc_Q = make_supercells(input_Q)
+        thr_nom = threshold(input_Q,val_max,47) # 1.35 transverse MIPs
+        thr_hi  = threshold(input_Q,val_max,69) # 2.0  transverse MIPs
+
         # metrics to compute on the validation dataset
-        metrics = {'xcorr':cross_corr,
-                   'ssd':ssd,
-                   'emd':emd,
-                   'wgtd_mean':d_weighted_mean,
+        metrics = {'xcorr'    :cross_corr,
+                   'ssd'      :ssd,
+                   'emd'      :emd,
+                   'diff_mean':d_weighted_mean,
                }
-        #super-cell variants
-        sc_metrics = {'sc_'+n : (lambda x,y : f[n](make_supercells(x),make_supercells(y))) for n in metrics}
-        # threshold variants
-        for pct in [47,69]:
-            thr_metrics = {'thr{}_'.format(pct)+n : (lambda x,y : f[n](threshold(x,val_max,pct),threshold(y,val_max,pct))) for n in metrics}
-        all_metrics = metrics.update(sc_metrics)
-        metric_arrays={}
-        for name in all_metrics:
-            func = all_metrics[name]
-            metric_arrays[name] = np.array([func(input_Q[i],decoded_Q[i]) for i in range(0,len(decoded_Q))])
 
         
+
+        # # super trigger cell variants
+        # sc_metrics = {'sc_'+n : (lambda x,y,_=None : (metrics[n])(make_supercells(x),make_supercells(y))) for n in metrics}
+        # # threshold variants
+        # thr_metrics={}
+        # for pct in [47,69]: #1.35 and 2.0 transverse MIPs
+        #     thr_metrics.update({'thr{}_'.format(pct)+n : (lambda x,y,maxVal : (metrics[n])(threshold(x,maxVal,pct),threshold(y,maxVal,pct))) for n in metrics})
+        # all_metrics = metrics.copy()
+        # all_metrics.update(sc_metrics)
+        # all_metrics.update(thr_metrics)
+        # #metric_arrays={name : np.array([(all_metrics[name])(input_Q[i],cnn_deQ[i]) for i in range(0,len(input_Q))]) for name in all_metrics}
+
+        metric_arrays={name : np.array([(all_metrics[name])(input_Q[i],cnn_deQ[i],val_max[i]) for i in range(0,len(input_Q))]) for name in all_metrics}
+
         corr_arr, ssd_arr, emd_arr = visMetric(input_Q,cnn_deQ,val_max,name=model_name, skipPlot=options.skipPlot)
-        
+
         if not options.skipPlot:
             hi_corr_index = (np.where(corr_arr>0.9))[0]
             low_corr_index = (np.where(corr_arr<0.2))[0]
