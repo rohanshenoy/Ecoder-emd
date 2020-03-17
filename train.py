@@ -302,10 +302,10 @@ def trainCNN(options, args, pam_updates=None):
     print("Is GPU available? ", tf.test.is_gpu_available())
 
     # default precisions for quantized training
-    nBits_input  = {'total': 16, 'integer': 6}
-    nBits_accum  = {'total': 16, 'integer': 6}
-    nBits_weight = {'total': 16, 'integer': 6}
-    nBits_encod  = {'total': 16, 'integer': 6}
+    nBits_input  = {'total': 32, 'integer': 4}
+    nBits_accum  = {'total': 32, 'integer': 4}
+    nBits_weight = {'total': 32, 'integer': 4}
+    nBits_encod  = {'total': 32, 'integer': 4}
     # model-dependent -- use common weights unless overridden
     conv_qbits = nBits_weight
     dense_qbits = nBits_weight
@@ -317,8 +317,9 @@ def trainCNN(options, args, pam_updates=None):
         df_arr = []
         for infile in os.listdir(options.inputFile):
             infile = os.path.join(options.inputFile,infile)
-            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0))
+            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, usecols=[*range(1, 49)]))
         data = pd.concat(df_arr)
+        data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
         print(data.shape)
         data.describe()
     else:
@@ -364,12 +365,21 @@ def trainCNN(options, args, pam_updates=None):
                            15,31, 47])
     
     models = [
-        {'name': '4x4_norm_d10', 'ws': '',
-         'pams': {'shape': (4, 4, 3), 
+        #{'name': '4x4_norm_d10', 'ws': '',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'weightedMSE'}},
+        {'name': '4x4_norm_v7', 'ws': '',
+         'pams': {'shape': (4, 4, 3),
                   'channels_first': False,
-                  'arrange': arrange443, 
-                  'encoded_dim': 10, 
-                  'loss': 'weightedMSE'}},
+                  'arrange': arrange443,
+                  'loss': 'weightedMSE',
+                  'CNN_layer_nodes': [4, 4, 4],
+                  'CNN_kernel_size': [5, 5, 3],
+                  'CNN_pool': [False, False, False], }},
+
     ]
 
     #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import json
 
 from train import trainCNN
-from util import plotGraphErr
+from utils import plotGraphErr
 
 def plotScan(x,outs,name,odir,xtitle="n bits"):
     outs = pd.concat(outs)
