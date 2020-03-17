@@ -313,8 +313,17 @@ def trainCNN(options, args, pam_updates=None):
   
     # from tensorflow.keras import backend
     # backend.set_image_data_format('channels_first')
-    
-    data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
+    if os.path.isdir(options.inputFile):
+        df_arr = []
+        for infile in os.listdir(options.inputFile):
+            infile = os.path.join(options.inputFile,infile)
+            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0))
+        data = pd.concat(df_arr)
+        print(data.shape)
+        data.describe()
+    else:
+        data = pd.read_csv(options.inputFile,dtype=np.float64)
+    #data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
     normdata,maxdata = normalize(data.values.copy(),rescaleInputToMax=options.rescaleInputToMax)
 
     arrange8x8 = np.array([
