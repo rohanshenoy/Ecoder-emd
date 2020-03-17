@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import json
 
 from train import trainCNN
-from util import plotGraphErr
+from utils import plotGraphErr
 
 def plotScan(x,outs,name,odir,xtitle="n bits"):
     outs = pd.concat(outs)
@@ -26,7 +26,7 @@ def BitScan(options, args):
         updates = [{'nBits_input':{'total': b, 'integer': 2}} for b in bits]
         outputs = [trainCNN(options,args,u) for u in updates]
         plotScan(bits,outputs,"test_input_bits",options.odir,xtitle="total input bits")
-    
+
     if False:
         # test weights
         bits = [i+1 for i in range(8)]

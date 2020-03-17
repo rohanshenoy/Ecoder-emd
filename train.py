@@ -34,7 +34,7 @@ def normalize(data,rescaleInputToMax=False):
             data[i] = 1.*data[i]/data[i].sum()
     return data,np.array(norm)
 
-def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40, 
+def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40,
              stats=True, logy=False, leg=None):
     plt.figure(figsize=(6,4))
     if leg:
@@ -58,7 +58,7 @@ def split(shaped_data, validation_frac=0.2):
     N = round(len(shaped_data)*validation_frac)
     
     #randomly select 25% entries
-    val_index = np.random.choice(shaped_data.shape[0], N, replace=False)  
+    val_index = np.random.choice(shaped_data.shape[0], N, replace=False)
     #select the indices of the other 75%
     full_index = np.array(range(0,len(shaped_data)))
     train_index = np.logical_not(np.in1d(full_index,val_index))
@@ -143,7 +143,7 @@ hexCoords = np.array([
     [-1.5697594, -16.0113], [-3.6627693, -14.802895], [-5.7557793, -13.594498], [-7.848793, -12.386101]])
 hexMetric = ot.dist(hexCoords, hexCoords, 'euclidean')
 MAXDIST = 16.08806614
-def emd(_x, _y, threshold=-1):    
+def emd(_x, _y, threshold=-1):
     if (np.sum(_x)==0 or np.sum(_y)==0): return MAXDIST
     x = np.array(_x, dtype=np.float64)
     y = np.array(_y, dtype=np.float64)
@@ -242,11 +242,11 @@ def visDisplays(index,input_Q,decoded_Q,encoded_Q=np.array([]),name='model_X'):
     plt.tight_layout()
     plt.savefig("%s_examples.png"%name)
     plt.close()
-    
-def visMetric(input_Q,decoded_Q,metric,name,odir,skipPlot=False): 
-    
+
+def visMetric(input_Q,decoded_Q,metric,name,odir,skipPlot=False):
+
     plotHist(vals,name,options.odir,xtitle=longMetric[mname])
-  
+
     plt.figure(figsize=(6,4))
     plt.hist([input_Q.flatten(),decoded_Q.flatten()],20,label=['input','output'])
     plt.yscale('log')
@@ -257,7 +257,7 @@ def visMetric(input_Q,decoded_Q,metric,name,odir,skipPlot=False):
 
     input_Q_abs   = np.array([input_Q[i] * maxQ[i] for i in range(0,len(input_Q))])
     decoded_Q_abs = np.array([decoded_Q[i]*maxQ[i] for i in range(0,len(decoded_Q))])
-  
+
     nonzeroQs = np.count_nonzero(input_Q_abs.reshape(len(input_Q_abs),48),axis=1)
     occbins = [0,5,10,20,48]
     fig, axes = plt.subplots(1,len(occbins)-1, figsize=(16, 4))
@@ -276,12 +276,23 @@ def visMetric(input_Q,decoded_Q,metric,name,odir,skipPlot=False):
         plt.close()
 
     return cross_corr_arr,ssd_arr,emd_arr
-  
-def GetBitsString(In, Accum, Weight):
+
+def GetBitsString(In, Accum, Weight, Encoded, Dense=False, Conv=False):
     s=""
     s += "Input{}b{}i".format(In['total'],In['integer'])
     s += "_Accum{}b{}i".format(Accum['total'],Accum['integer'])
-    s += "_Weight{}b{}i".format(Weight['total'],Weight['integer'])
+    if Dense:
+        s += "_Dense{}b{}i".format(Dense['total'], Dense['integer'])
+        if Conv:
+            s += "_Conv{}b{}i".format(Conv['total'], Conv['integer'])
+        else:
+            s += "_Conv{}b{}i".format(Weight['total'], Weight['integer'])
+    elif Conv:
+        s += "_Dense{}b{}i".format(Weight['total'], Weight['integer'])
+        s += "_Conv{}b{}i".format(Conv['total'], Conv['integer'])
+    else:
+        s += "_Weight{}b{}i".format(Weight['total'],Weight['integer'])
+    s += "_Encod{}b{}i".format(Encoded['total'], Encoded['integer'])
     return s
 
 def trainCNN(options, args, pam_updates=None):
@@ -291,10 +302,10 @@ def trainCNN(options, args, pam_updates=None):
     print("Is GPU available? ", tf.test.is_gpu_available())
 
     # default precisions for quantized training
-    nBits_input  = {'total': 16, 'integer': 6}
-    nBits_accum  = {'total': 16, 'integer': 6}
-    nBits_weight = {'total': 16, 'integer': 6}
-    nBits_encod  = {'total': 16, 'integer': 6}
+    nBits_input  = {'total': 32, 'integer': 4}
+    nBits_accum  = {'total': 32, 'integer': 4}
+    nBits_weight = {'total': 32, 'integer': 4}
+    nBits_encod  = {'total': 32, 'integer': 4}
     # model-dependent -- use common weights unless overridden
     conv_qbits = nBits_weight
     dense_qbits = nBits_weight
@@ -306,8 +317,9 @@ def trainCNN(options, args, pam_updates=None):
         df_arr = []
         for infile in os.listdir(options.inputFile):
             infile = os.path.join(options.inputFile,infile)
-            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0))
+            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, usecols=[*range(1, 49)]))
         data = pd.concat(df_arr)
+        data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
         print(data.shape)
         data.describe()
     else:
@@ -353,12 +365,21 @@ def trainCNN(options, args, pam_updates=None):
                            15,31, 47])
     
     models = [
-        {'name': '4x4_norm_d10', 'ws': '',
-         'pams': {'shape': (4, 4, 3), 
+        #{'name': '4x4_norm_d10', 'ws': '',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'weightedMSE'}},
+        {'name': '4x4_norm_v7', 'ws': '',
+         'pams': {'shape': (4, 4, 3),
                   'channels_first': False,
-                  'arrange': arrange443, 
-                  'encoded_dim': 10, 
-                  'loss': 'weightedMSE'}},
+                  'arrange': arrange443,
+                  'loss': 'weightedMSE',
+                  'CNN_layer_nodes': [4, 4, 4],
+                  'CNN_kernel_size': [5, 5, 3],
+                  'CNN_pool': [False, False, False], }},
+
     ]
 
     #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },
@@ -484,7 +505,7 @@ def trainCNN(options, args, pam_updates=None):
                   'dMean':'difference in energy-weighted mean',
                   'zero_frac':'zero fraction',}
     summary_entries=['name','en_pams','tot_pams']
-    for algname in algnames: 
+    for algname in algnames:
         for mname in metrics:
             name = mname+"_"+algname
             summary_entries.append(mname+"_"+algname)
@@ -497,9 +518,10 @@ def trainCNN(options, args, pam_updates=None):
     for model in models:
         model_name = model['name']
         if options.quantize: 
-            bit_str = GetBitsString(m['pams']['nBits_input'],
-                                    m['pams']['nBits_accum'],
-                                    m['pams']['nBits_weight'])
+            bit_str = GetBitsString(model['pams']['nBits_input'], model['pams']['nBits_accum'],
+                                    model['pams']['nBits_weight'], model['pams']['nBits_encod'],
+                                    (model['pams']['nBits_dense'] if 'nBits_dense'  in model['pams'] else False),
+                                    (model['pams']['nBits_conv'] if 'nBits_conv' in model['pams'] else False))
             model_name += "_" + bit_str
         if not os.path.exists(model_name): os.mkdir(model_name)
         os.chdir(model_name)
@@ -514,7 +536,7 @@ def trainCNN(options, args, pam_updates=None):
         val_input, train_input, val_ind = split(shaped_data)
         m_autoCNN , m_autoCNNen         = m.get_models()
         val_max = maxdata[val_ind]
-        
+
         if model['ws']=='':
             if options.quickTrain: train_input = train_input[:5000]
             history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
@@ -525,7 +547,7 @@ def trainCNN(options, args, pam_updates=None):
             'name':model_name,
             'en_pams' : m_autoCNNen.count_params(),
             'tot_pams': m_autoCNN.count_params(),}
-                
+
         input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
         
         ## csv files for RTL verification
@@ -546,7 +568,7 @@ def trainCNN(options, args, pam_updates=None):
                     'thr_hi': thr_hi_Q,
                 }
 
-        # to generate event displays 
+        # to generate event displays
         Nevents = 8
         index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
 
@@ -569,7 +591,7 @@ def trainCNN(options, args, pam_updates=None):
                 vals = np.sort(vals)
                 model[name]        = np.round(np.mean(vals), 3)
                 model[name+'_err'] = np.round(np.std(vals), 3)
-                summary_dict[name]        = model[name]       
+                summary_dict[name]        = model[name]
                 summary_dict[name+'_err'] = model[name+'_err']
                 if(not options.skipPlot) and (not('zero_frac' in mname)):
                     plotHist(vals,"hist_"+name,xtitle=longMetric[mname])
@@ -577,15 +599,15 @@ def trainCNN(options, args, pam_updates=None):
                     lo_index = (np.where(vals<np.quantile(vals,0.2)))[0]
                     # visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
                     if len(hi_index)>0:
-                        hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)  
+                        hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
                         visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
                     if len(lo_index)>0:
-                        lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)  
-                        visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)                        
+                        lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
+                        visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
                 
         print('summary_dict',summary_dict)
         summary = summary.append(summary_dict, ignore_index=True)
-        
+
         with open(model_name+"_pams.json",'w') as f:
             f.write(json.dumps(m.get_pams(),indent=4))
         
