@@ -199,6 +199,14 @@ class qDenseCNN:
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
 
+        elif self.pams['loss'] == 'sink':
+            import ot_tf
+            x_tf = tf.compat.v1.placeholder(dtype=tf.float32, shape=[48, 2])
+            y_tf = tf.compat.v1.placeholder(dtype=tf.float32, shape=[48, 2])
+            M_tf = ot_tf.dmat(x_tf, y_tf)
+            tf_sinkhorn_loss = ot_tf.sink(M_tf, (48,48), 0.5)
+            self.autoencoder.compile(loss=tf_sinkhorn_loss, optimizer='adam')
+            self.encoder.compile(loss=tf_sinkhorn_loss, optimizer='adam')
         elif self.pams['loss'] != '':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')

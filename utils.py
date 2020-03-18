@@ -38,3 +38,24 @@ def plotHist(vals,name,odir,xtitle="",ytitle="",nbins=40):
     plt.savefig(odir+"/"+name+".png")
     plt.close()
     return
+
+def decode_ECON(mantissa, exp, n_mantissa=3,n_exp=4):
+    if exp==0: return mantissa
+    mantissa += (1<<n_mantissa)
+    return mantissa << (exp-1)
+
+def encode_ECON(val,n_mantissa=3,n_exp=4):
+    # return (mantissa , exponent)
+    if val==0: return (0, 0)
+    msb = int(np.log2(val))
+    if msb<n_mantissa: return (val, 0)
+    exp = max(msb-n_mantissa+1,(1<<n_exp)-1)
+    mantissa = (val>>exp) - (1<<(n_mantissa-1))
+    return (mantissa,exp)
+
+def test_econ():
+    for m in range(1<<3):    
+        for e in range(1<<4):
+            val = decode_ECON(m,e)
+            m1, e1 = encode_ECON(val)
+            print(m,e,'-->',val,'-->',m1,e1)
