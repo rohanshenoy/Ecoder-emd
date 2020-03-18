@@ -16,7 +16,7 @@ def normalize(data,rescaleInputToMax=False):
     for i in range(len(data)):
         norm.append( data[i].max() )
         sumd.append( data[i].sum() )
-        data[i] = 1.*data[i]/data[i].max()
+        data[i] = 1.*data[i]/data[i].sum()
     return data,np.array(norm),np.array(sumd)
 
 # Encode fraction as integer, making the (inefficient)
@@ -50,28 +50,85 @@ def test():
 
     # (3) find the module sum with “full” 27/25b precision (21/19b per TC * 48 TC)
     # (4) find the AE input fractions using on the “full" precision 27/25b values
-    normdata,maxdata,sumdata = normalize(data.values.copy())
+    tc_data = data.to_numpy()
+    normdata,maxdata,sumdata = normalize(tc_data.copy())
 
+    # The inputs from the CSV files are already encoded and decoded
+    #
     # (1) perform 4E+3M ROC TC encoding to 7b
-    data_encoded = np.array([encode(int(x),expBits=4,mantBits=3,asInt=True) for x in data.to_numpy().flatten()]).reshape(normdata.shape)
-
+    #data_encoded = np.array([encode(int(x),expBits=4,mantBits=3,asInt=True) for x in data.to_numpy().flatten()]).reshape(normdata.shape)
     # (2) perform ECON TC decoding to 21/19 bits
-    data_decoded = np.array([decode(x,expBits=4,mantBits=3) for x in data_encoded.flatten()]).reshape(normdata.shape)
+    #data_decoded = np.array([decode(x,expBits=4,mantBits=3) for x in data_encoded.flatten()]).reshape(normdata.shape)
 
-    # (5) encode the sum with 5E+3M, 5E+4M, and 5E+5M
-    sum_encoded = np.array([encode(int(x),expBits=5,mantBits=4,asInt=True) for x in sumdata])
+    results={}
+    for sum_exp, sum_mant in [(5,3),(5,4),(5,5),(16,16)]:
+        for frac_bits in [4,5,6,7,8,10,12,16]:
 
-    # (6) encode the fractions with 4,5,…,8b 
-    #normdata_encoded = np.array([encode_fraction(x,nBits=5) for x in normdata])
-    normdata_encoded = encode_fraction(normdata,nBits=5)
+            # (5) encode the sum with 5E+3M, 5E+4M, and 5E+5M
+            sum_encoded = np.array([encode(int(x),expBits=sum_exp,mantBits=sum_mant,asInt=True) for x in sumdata])
+        
+            # (6) encode the fractions with 4,5,…,8b 
+            #normdata_encoded = np.array([encode_fraction(x,nBits=5) for x in normdata])
+            normdata_encoded = encode_fraction(normdata,nBits=frac_bits)
+        
+            # (g) PART I: decode the sum and fractions ...
+            sum_decoded = np.array([decode(x,expBits=sum_exp,mantBits=sum_mant) for x in sum_encoded])
+            normdata_decoded = decode_fraction(normdata_encoded,nBits=frac_bits)
 
-    # (g) decode the sum and fractions and multiply to find the value of each TC
-    sum_decoded = np.array([decode(x,expBits=5,mantBits=4) for x in sum_encoded])
-    #normdata_decoded = np.array([decode_fraction(x,nBits=5) for x in normdata_encoded])
-    normdata_decoded = decode_fraction(normdata_encoded,nBits=5)
+            # the decorded fractions may not sum to 1, so we can re-normalize
+            renormdata_size = np.array([(normdata_decoded[i].sum()) for i in range(len(normdata_decoded))])
+            renormdata_decoded = np.array([normdata_decoded[i]/(normdata_decoded[i].sum()) for i in range(len(normdata_decoded))])
 
-    # (h) plot TC residual  vs TC energy (as you already do for other encoding)
-    # ...
+            # (g) PART II: ... and multiply to find the value of each TC
+            data_decoded_from_norm = np.array([normdata_decoded[i]*sum_decoded[i] for i in range(len(sum_decoded))])
+
+            results[(sum_exp, sum_mant, frac_bits,1)] = renormdata_size
+
+            # (h) plot TC residual  vs TC energy (as you already do for other encoding)
+            results[(sum_exp, sum_mant, frac_bits)] = data_decoded_from_norm
+
+            # print some checks
+            if False and sum_exp==5 and sum_mant==5 and frac_bits==8:
+                evtno=10
+                print("Input data\n",tc_data[evtno].reshape(12,4))
+                print("Sum data ",sumdata[evtno])
+                print("Sum encoded ",sum_encoded[evtno])
+                print("Sum decoded ",sum_decoded[evtno])
+                print("Norm data\n",normdata[evtno].reshape(12,4))
+                print("Norm encoded\n",normdata_encoded[evtno].reshape(12,4))
+                print("Norm decoded\n",normdata_decoded[evtno].reshape(12,4))
+                print("Norm*Sum decoded\n",data_decoded_from_norm[evtno].reshape(12,4))
+                frac_diff = np.divide(data_decoded_from_norm-tc_data,tc_data,out=np.zeros_like(tc_data),where=(tc_data!=0))
+                print("Frac diff\n",frac_diff[evtno].reshape(12,4))
+
+                
+
+    
+    for r,resid in results.items():
+        if len(r)==3:
+            tag = "{}exp_{}mant_frac{}".format(*r)
+            title = "Sum: {}b exp, {}b mant, Fraction: {}b".format(*r)
+            frac_diff = np.divide(resid-tc_data,tc_data,out=np.zeros_like(tc_data),where=(tc_data!=0))
+            plt.scatter(tc_data.flatten(), frac_diff.flatten())
+            plt.title(title)
+            plt.ylabel('(Decoded - True) / True')
+            plt.xlabel('TC cell value')
+            plt.xscale('log')
+            plt.xlim(1,1e4)
+            plt.savefig("plots/resid_{}.png".format(tag))
+            plt.close()
+            
+    # quick hack to print normalizations
+    for r,resid in results.items():
+        if len(r)==4:
+            tag = "{}exp_{}mant_frac{}_{}".format(*r)
+            plt.hist(resid,50)
+            plt.title('Model loss {}'.format(tag))
+            plt.ylabel('')
+            plt.xlabel('diff')
+            #plt.legend(['Train', 'Test'], loc='upper right')
+            plt.savefig("plots/sum_{}.png".format(tag))
+            plt.close()
 
 
     
