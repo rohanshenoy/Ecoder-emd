@@ -106,6 +106,7 @@ def test():
     
     for r,resid in results.items():
         if len(r)==3:
+            # scatter plot
             tag = "{}exp_{}mant_frac{}".format(*r)
             title = "Sum: {}b exp, {}b mant, Fraction: {}b".format(*r)
             frac_diff = np.divide(resid-tc_data,tc_data,out=np.zeros_like(tc_data),where=(tc_data!=0))
@@ -117,6 +118,20 @@ def test():
             plt.xlim(1,1e4)
             plt.savefig("plots/resid_{}.png".format(tag))
             plt.close()
+
+            # heat map
+            dflat = tc_data.flatten()
+            logs = np.where(dflat>1,np.log10(dflat),0.)
+            nonempty = logs > 0
+            #fig, ax = plt.subplots(1, 1)
+            plt.hist2d(logs[nonempty],(frac_diff.flatten())[nonempty], bins=100, norm=matplotlib.colors.LogNorm())
+            plt.title(title)
+            plt.ylabel('(Decoded - True) / True')
+            plt.xlabel('log10(TC cell value)')
+            plt.colorbar()#pcm, ax=ax[0], extend='max')
+            plt.savefig("plots/resid_heat_{}.png".format(tag))
+            plt.close()
+
             
     # quick hack to print normalizations
     for r,resid in results.items():
