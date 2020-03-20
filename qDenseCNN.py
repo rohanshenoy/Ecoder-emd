@@ -14,7 +14,6 @@ import json
 import ot_tf
 import ot
 
-
 hexCoords = np.array([ 
     [0.0, 0.0], [0.0, -2.4168015], [0.0, -4.833603], [0.0, -7.2504044], 
     [2.09301, -1.2083969], [2.09301, -3.6251984], [2.09301, -6.042], [2.09301, -8.458794], 
@@ -51,9 +50,31 @@ def sinkhorn_loss(y_true, y_pred):
     # sy_pred = tf.split(y_pred,num_or_size_splits=K.shape(y_pred)[0],axis=0)
     # losses = [ ot_tf.sink(sy_true[i], sy_pred[i], hexMetric, (48, 48), reg) for r in range(len(sy_true))]
     # return losses[0]
-    #tf_sinkhorn_loss = K.mean( ot_tf.sink(y_true, y_pred, hexMetric, (48, 48), reg), axis=(-1) )
+    # tf_sinkhorn_loss = K.mean( ot_tf.sink(y_true, y_pred, hexMetric, (48, 48), reg), axis=(-1) )
     # tf_sinkhorn_loss = K.mean( tf.numpy_function(myfunc, [y_true, y_pred], y_pred.dtype) )
     # return tf_sinkhorn_loss
+
+def other_loss(y_true, y_pred):
+    y_true = K.cast(y_true, y_pred.dtype)
+    loss1 = K.mean(K.square(y_true - y_pred) * K.maximum(y_pred, y_true), axis=(-1))
+
+    # y_pred_rs = K.reshape(y_pred, (-1,48))
+    # y_true_rs = K.reshape(y_true, (-1,48))
+    # y_pred_x = 
+    
+    y_pred_pool = tf.nn.pool(y_pred,(2,2),'AVG',strides=[1,1])
+    y_true_pool = tf.nn.pool(y_true,(2,2),'AVG',strides=[1,1])
+    loss2 = K.mean(K.square(y_true_pool - y_pred_pool) * K.maximum(y_true_pool, y_pred_pool), axis=(-1))
+    #return loss1 + loss2
+    return loss1
+
+    # return K.mean( tf.map_fn(myfunc, cc), axis=(-1) )
+
+def weightedMSE(self, y_true, y_pred):
+    y_true = K.cast(y_true, y_pred.dtype)
+    loss = K.mean(K.square(y_true - y_pred) * K.maximum(y_pred, y_true), axis=(-1))
+    return loss
+
 
 class qDenseCNN:
     def __init__(self, name='', weights_f=''):
@@ -244,8 +265,10 @@ class qDenseCNN:
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
 
         elif self.pams['loss'] == 'sink':
-            self.autoencoder.compile(loss=sinkhorn_loss, optimizer='adam')
-            self.encoder.compile(loss=sinkhorn_loss, optimizer='adam')
+            self.autoencoder.compile(loss=other_loss, optimizer='adam')
+            self.encoder.compile(loss=other_loss, optimizer='adam')
+            # self.autoencoder.compile(loss=sinkhorn_loss, optimizer='adam')
+            # self.encoder.compile(loss=sinkhorn_loss, optimizer='adam')
         elif self.pams['loss'] != '':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')
