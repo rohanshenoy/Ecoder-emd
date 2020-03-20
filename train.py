@@ -540,6 +540,8 @@ def trainCNN(options, args, pam_updates=None):
 
         if model['ws']=='':
             if options.quickTrain: train_input = train_input[:5000]
+            # train_input = train_input.reshape(len(train_input),48)
+            # val_input = val_input.reshape(len(val_input),48)
             history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
         else:
             save_models(m_autoCNN,model_name)
