@@ -10,6 +10,71 @@ from qkeras import QDense, QConv2D, QActivation
 import numpy as np
 import json
 
+# for sinkhorn metric
+import ot_tf
+import ot
+
+hexCoords = np.array([ 
+    [0.0, 0.0], [0.0, -2.4168015], [0.0, -4.833603], [0.0, -7.2504044], 
+    [2.09301, -1.2083969], [2.09301, -3.6251984], [2.09301, -6.042], [2.09301, -8.458794], 
+    [4.18602, -2.4168015], [4.18602, -4.833603], [4.18602, -7.2504044], [4.18602, -9.667198], 
+    [6.27903, -3.6251984], [6.27903, -6.042], [6.27903, -8.458794], [6.27903, -10.875603], 
+    [-8.37204, -10.271393], [-6.27903, -9.063004], [-4.18602, -7.854599], [-2.0930138, -6.6461945], 
+    [-8.37204, -7.854599], [-6.27903, -6.6461945], [-4.18602, -5.4377975], [-2.0930138, -4.229393], 
+    [-8.37204, -5.4377975], [-6.27903, -4.229393], [-4.18602, -3.020996], [-2.0930138, -1.8125992], 
+    [-8.37204, -3.020996], [-6.27903, -1.8125992], [-4.18602, -0.6042023], [-2.0930138, 0.6042023], 
+    [4.7092705, -12.386101], [2.6162605, -11.177696], [0.5232506, -9.969299], [-1.5697594, -8.760895], 
+    [2.6162605, -13.594498], [0.5232506, -12.386101], [-1.5697594, -11.177696], [-3.6627693, -9.969299], 
+    [0.5232506, -14.802895], [-1.5697594, -13.594498], [-3.6627693, -12.386101], [-5.7557793, -11.177696], 
+    [-1.5697594, -16.0113], [-3.6627693, -14.802895], [-5.7557793, -13.594498], [-7.848793, -12.386101]])
+hexMetric = tf.constant( ot.dist(hexCoords, hexCoords, 'euclidean'), tf.float32)
+
+def myfunc(a):
+    reg=0.5
+    y_true, y_pred = tf.split(a,num_or_size_splits=2,axis=1)
+    tf_sinkhorn_loss = ot_tf.sink(y_true, y_pred, hexMetric, (48, 48), reg)
+    return tf_sinkhorn_loss
+
+def sinkhorn_loss(y_true, y_pred):
+    y_true = K.cast(y_true, y_pred.dtype)
+    y_pred = K.reshape(y_pred, (-1,48,1))
+    y_true = K.reshape(y_true, (-1,48,1))
+    cc = tf.concat([y_true, y_pred], axis=2)
+    return K.mean( tf.map_fn(myfunc, cc), axis=(-1) )
+
+    # return K.mean( tf.map_fn(myfunc, y_true), axis=(-1) )
+    # return K.mean( tf.map_fn(myfunc, [y_true, y_pred]), axis=(-1) )
+    # tf_sinkhorn_loss = K.mean( tf.numpy_function(myfunc, [y_true, y_pred], y_pred.dtype) )
+    # return tf_sinkhorn_loss    
+    # sy_true = tf.split(y_true,num_or_size_splits=K.shape(y_true)[0],axis=0)
+    # sy_pred = tf.split(y_pred,num_or_size_splits=K.shape(y_pred)[0],axis=0)
+    # losses = [ ot_tf.sink(sy_true[i], sy_pred[i], hexMetric, (48, 48), reg) for r in range(len(sy_true))]
+    # return losses[0]
+    # tf_sinkhorn_loss = K.mean( ot_tf.sink(y_true, y_pred, hexMetric, (48, 48), reg), axis=(-1) )
+    # tf_sinkhorn_loss = K.mean( tf.numpy_function(myfunc, [y_true, y_pred], y_pred.dtype) )
+    # return tf_sinkhorn_loss
+
+def other_loss(y_true, y_pred):
+    y_true = K.cast(y_true, y_pred.dtype)
+    loss1 = K.mean(K.square(y_true - y_pred) * K.maximum(y_pred, y_true), axis=(-1))
+
+    # y_pred_rs = K.reshape(y_pred, (-1,48))
+    # y_true_rs = K.reshape(y_true, (-1,48))
+    # y_pred_x = 
+    
+    y_pred_pool = tf.nn.pool(y_pred,(2,2),'AVG',strides=[1,1])
+    y_true_pool = tf.nn.pool(y_true,(2,2),'AVG',strides=[1,1])
+    loss2 = K.mean(K.square(y_true_pool - y_pred_pool) * K.maximum(y_true_pool, y_pred_pool), axis=(-1))
+    #return loss1 + loss2
+    return loss1
+
+    # return K.mean( tf.map_fn(myfunc, cc), axis=(-1) )
+
+def weightedMSE(self, y_true, y_pred):
+    y_true = K.cast(y_true, y_pred.dtype)
+    loss = K.mean(K.square(y_true - y_pred) * K.maximum(y_pred, y_true), axis=(-1))
+    return loss
+
 
 class qDenseCNN:
     def __init__(self, name='', weights_f=''):
@@ -200,13 +265,10 @@ class qDenseCNN:
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
 
         elif self.pams['loss'] == 'sink':
-            import ot_tf
-            x_tf = tf.compat.v1.placeholder(dtype=tf.float32, shape=[48, 2])
-            y_tf = tf.compat.v1.placeholder(dtype=tf.float32, shape=[48, 2])
-            M_tf = ot_tf.dmat(x_tf, y_tf)
-            tf_sinkhorn_loss = ot_tf.sink(M_tf, (48,48), 0.5)
-            self.autoencoder.compile(loss=tf_sinkhorn_loss, optimizer='adam')
-            self.encoder.compile(loss=tf_sinkhorn_loss, optimizer='adam')
+            self.autoencoder.compile(loss=other_loss, optimizer='adam')
+            self.encoder.compile(loss=other_loss, optimizer='adam')
+            # self.autoencoder.compile(loss=sinkhorn_loss, optimizer='adam')
+            # self.encoder.compile(loss=sinkhorn_loss, optimizer='adam')
         elif self.pams['loss'] != '':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')
