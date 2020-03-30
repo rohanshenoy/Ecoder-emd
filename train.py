@@ -365,21 +365,21 @@ def trainCNN(options, args, pam_updates=None):
                            15,31, 47])
     
     models = [
-        #{'name': '4x4_norm_d10', 'ws': '',
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'weightedMSE'}},
-        {'name': '4x4_norm_v7', 'ws': '',
-         'pams': {'shape': (4, 4, 3),
-                  'channels_first': False,
-                  'arrange': arrange443,
-                  #'loss': 'weightedMSE',
-                  'loss': 'sink',
-                  'CNN_layer_nodes': [4, 4, 4],
-                  'CNN_kernel_size': [5, 5, 3],
-                  'CNN_pool': [False, False, False], }},
+        {'name': '4x4_norm_d10', 'ws': '',
+        'pams': {'shape': (4, 4, 3),
+                 'channels_first': False,
+                 'arrange': arrange443,
+                 'encoded_dim': 10,
+                 'loss': 'weightedMSE'}},
+        # {'name': '4x4_norm_v7', 'ws': '',
+        #  'pams': {'shape': (4, 4, 3),
+        #           'channels_first': False,
+        #           'arrange': arrange443,
+        #           #'loss': 'weightedMSE',
+        #           'loss': 'sink',
+        #           'CNN_layer_nodes': [4, 4, 4],
+        #           'CNN_kernel_size': [5, 5, 3],
+        #           'CNN_pool': [False, False, False], }},
 
     ]
 
