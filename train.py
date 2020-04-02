@@ -60,7 +60,9 @@ def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40,
     plt.xlabel(xtitle)
     plt.ylabel(ytitle if ytitle else 'Entries')
     if logy: plt.yscale('log')
-    plt.savefig(odir+"/"+name+".png")
+    pname = odir+"/"+name+".png"
+    print("Saving "+pname)
+    plt.savefig(pname)
     plt.close()
     return
 
@@ -86,7 +88,9 @@ def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,
     plt.xlabel(xtitle)
     plt.ylabel(ytitle)
     if logy: plt.yscale('log')
-    plt.savefig(odir+"/"+name+".png")
+    pname = odir+"/"+name+".png"
+    print("Saving "+pname)
+    plt.savefig(pname)
     plt.close()
     return bin_centers, means, standard_deviations
 
@@ -95,7 +99,7 @@ def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.'):
     centers = results[0][1][0]
     print (centers)
     wid = centers[1]-centers[0]
-    offset = 0.1*wid
+    offset = 0.33*wid
 
     plt.figure(figsize=(6,4))
 
@@ -103,7 +107,7 @@ def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.'):
         lab = r[0]
         dat = r[1]
         off = offset * (ir-1)/2 * (-1. if ir%2 else 1.) # .1 left, .1 right, .2 left, ...
-        plt.errorbar(x=dat[0], y=dat[1], yerr=dat[2], label=lab)
+        plt.errorbar(x=dat[0]+off, y=dat[1], yerr=dat[2], label=lab)
         #plt.errorbar(x=r[0], y=r[1], yerr=r[2], linestyle='none', marker='.', label=leg)
 
     ax = plt.axes()
@@ -112,7 +116,9 @@ def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.'):
     plt.ylabel(ytitle)
     plt.legend()
     #if logy: plt.yscale('log')
-    plt.savefig(odir+"/"+name+".png")
+    pname = odir+"/"+name+".png"
+    print("Saving "+pname)
+    plt.savefig(pname)
     plt.close()
 
     return
@@ -237,7 +243,7 @@ def emd(_x, _y, threshold=-1):
 
 def d_weighted_mean(x, y):
     if (np.sum(x)==0): return -1.
-    if (np.sum(_y)==0): return -0.5
+    if (np.sum(y)==0): return -0.5
     x = (1./x.sum() if x.sum() else 1.)*x.flatten()
     y = (1./y.sum() if y.sum() else 1.)*y.flatten()
     dx = hexCoords[:,0].dot(x-y)
@@ -604,6 +610,14 @@ def trainCNN(options, args, pam_updates=None):
         #'dRMS':d_weighted_rms,
         #'zero_frac':(lambda x,y: np.all(y==0)),
     }
+    if options.full:
+        more_metrics = {
+            'cross_corr':cross_corr,
+            'dMean':d_weighted_mean,
+            'dRMS':d_weighted_rms,
+        }
+        metrics.update(more_metrics)
+        
     longMetric = {'cross_corr':'cross correlation',
                   'SSD':'sum of squared differences',
                   'EMD':'earth movers distance',
@@ -682,13 +696,14 @@ def trainCNN(options, args, pam_updates=None):
         print("Running non-AE algorithms")
         thr_lo_Q = np.where(input_Q_abs>47,input_Q_abs,0) # 1.35 transverse MIPs
         stc16_Q = make_supercells(input_Q_abs)
-        # thr_hi_Q = np.where(input_Q_abs>47,input_Q_abs,0) # 2.0  transverse MIPs
         alg_outs = {
             'ae' : ae_out,
             'stc': stc16_Q,
             'thr_lo': thr_lo_Q,
-            #'thr_hi': thr_hi_Q,
         }
+        if options.full:
+            thr_hi_Q = np.where(input_Q_abs>69,input_Q_abs,0) # 2.0  transverse MIPs
+            alg_outs['thr_hi']=thr_hi_Q
 
         occupancy = np.count_nonzero(input_Q.reshape(len(input_Q),48),axis=1)
         if(not options.skipPlot): plotHist(occupancy.flatten(),"occ",xtitle="occupancy",ytitle="evts",
@@ -770,6 +785,7 @@ if __name__== "__main__":
     parser.add_option("--dryRun", action='store_true', default = False,dest="dryRun", help="dryRun")
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
     parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
+    parser.add_option("--full", action='store_true', default = False,dest="full", help="run all algorithms and metrics")
     parser.add_option("--quickTrain", action='store_true', default = False,dest="quickTrain", help="train w only 5k events for testing purposes")
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--maxVal", type='int', default = -1, dest="maxVal", help="n of validation events to consider")
