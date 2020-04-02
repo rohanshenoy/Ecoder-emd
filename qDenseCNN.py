@@ -34,7 +34,6 @@ def myfunc(a):
     y_true, y_pred = tf.split(a,num_or_size_splits=2,axis=1)
     tf_sinkhorn_loss = ot_tf.sink(y_true, y_pred, hexMetric, (48, 48), reg)
     return tf_sinkhorn_loss
-
 def sinkhorn_loss(y_true, y_pred):
     y_true = K.cast(y_true, y_pred.dtype)
     y_pred = K.reshape(y_pred, (-1,48,1))
@@ -42,38 +41,53 @@ def sinkhorn_loss(y_true, y_pred):
     cc = tf.concat([y_true, y_pred], axis=2)
     return K.mean( tf.map_fn(myfunc, cc), axis=(-1) )
 
-    # return K.mean( tf.map_fn(myfunc, y_true), axis=(-1) )
-    # return K.mean( tf.map_fn(myfunc, [y_true, y_pred]), axis=(-1) )
-    # tf_sinkhorn_loss = K.mean( tf.numpy_function(myfunc, [y_true, y_pred], y_pred.dtype) )
-    # return tf_sinkhorn_loss    
-    # sy_true = tf.split(y_true,num_or_size_splits=K.shape(y_true)[0],axis=0)
-    # sy_pred = tf.split(y_pred,num_or_size_splits=K.shape(y_pred)[0],axis=0)
-    # losses = [ ot_tf.sink(sy_true[i], sy_pred[i], hexMetric, (48, 48), reg) for r in range(len(sy_true))]
-    # return losses[0]
-    # tf_sinkhorn_loss = K.mean( ot_tf.sink(y_true, y_pred, hexMetric, (48, 48), reg), axis=(-1) )
-    # tf_sinkhorn_loss = K.mean( tf.numpy_function(myfunc, [y_true, y_pred], y_pred.dtype) )
-    # return tf_sinkhorn_loss
+SCmask = np.array([
+    [ 0,  1,  4,  5], #indices for 1 supercell
+    [ 2,  3,  6,  7],
+    [ 8,  9, 12, 13],
+    [10, 11, 14, 15],
+    [16, 17, 20, 21],
+    [18, 19, 22, 23],
+    [24, 25, 28, 29],
+    [26, 27, 30, 31],
+    [32, 33, 36, 37],
+    [34, 35, 38, 39],
+    [40, 41, 44, 45],
+    [43, 43, 46, 47]])
+# 48 x 12 matrix mapping TCs to SC
+Remap_48_12 = np.zeros((48,12))
+for isc,sc in enumerate(SCmask): 
+    for tc in sc: 
+        Remap_48_12[tc,isc]=1
+tf_Remap_48_12 = tf.constant(Remap_48_12,dtype=tf.float32)
+# 12 x 3 mapping
+Remap_12_3 = np.zeros((12,3))
+for i in range(12): Remap_12_3[i,int(i/4)]=1
+tf_Remap_12_3 = tf.constant(Remap_12_3,dtype=tf.float32)
 
-def other_loss(y_true, y_pred):
+def telescopeMSE(y_true, y_pred):
     y_true = K.cast(y_true, y_pred.dtype)
-    loss1 = K.mean(K.square(y_true - y_pred) * K.maximum(y_pred, y_true), axis=(-1))
 
-    # y_pred_rs = K.reshape(y_pred, (-1,48))
-    # y_true_rs = K.reshape(y_true, (-1,48))
-    # y_pred_x = 
-    
-    y_pred_pool = tf.nn.pool(y_pred,(2,2),'AVG',strides=[1,1])
-    y_true_pool = tf.nn.pool(y_true,(2,2),'AVG',strides=[1,1])
-    loss2 = K.mean(K.square(y_true_pool - y_pred_pool) * K.maximum(y_true_pool, y_pred_pool), axis=(-1))
-    #return loss1 + loss2
-    return loss1
+    # TC-level MSE
+    y_pred_rs = K.reshape(y_pred, (-1,48))
+    y_true_rs = K.reshape(y_true, (-1,48))
+    lossTC1 = K.mean(K.square(y_true_rs - y_pred_rs), axis=(-1))
+    #lossTC1 = K.mean(K.square(y_true_rs - y_pred_rs) * K.maximum(y_pred_rs, y_true_rs), axis=(-1))
 
-    # return K.mean( tf.map_fn(myfunc, cc), axis=(-1) )
+    # map TCs to 2x2 supercells and compute MSE
+    y_pred_12 = tf.matmul(y_pred_rs, tf_Remap_48_12)
+    y_true_12 = tf.matmul(y_true_rs, tf_Remap_48_12)
+    lossTC2 = K.mean(K.square(y_true_12 - y_pred_12), axis=(-1))
+    #lossTC2 = K.mean(K.square(y_true_12 - y_pred_12) * K.maximum(y_pred_12, y_true_12), axis=(-1))
+  
+    # map 2x2 supercells to 4x4 supercells and compute MSE
+    y_pred_3 = tf.matmul(y_pred_12, tf_Remap_12_3)
+    y_true_3 = tf.matmul(y_true_12, tf_Remap_12_3)
+    lossTC3 = K.mean(K.square(y_true_3 - y_pred_3), axis=(-1))
+    #lossTC3 = K.mean(K.square(y_true_3 - y_pred_3) * K.maximum(y_pred_3, y_true_3), axis=(-1))
 
-def weightedMSE(self, y_true, y_pred):
-    y_true = K.cast(y_true, y_pred.dtype)
-    loss = K.mean(K.square(y_true - y_pred) * K.maximum(y_pred, y_true), axis=(-1))
-    return loss
+    # sum MSEs
+    return lossTC1 + lossTC2 + lossTC3
 
 
 class qDenseCNN:
@@ -264,11 +278,12 @@ class qDenseCNN:
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
 
+        elif self.pams['loss'] == 'telescopeMSE':
+            self.autoencoder.compile(loss=telescopeMSE, optimizer='adam')
+            self.encoder.compile(loss=telescopeMSE, optimizer='adam')
         elif self.pams['loss'] == 'sink':
-            self.autoencoder.compile(loss=other_loss, optimizer='adam')
-            self.encoder.compile(loss=other_loss, optimizer='adam')
-            # self.autoencoder.compile(loss=sinkhorn_loss, optimizer='adam')
-            # self.encoder.compile(loss=sinkhorn_loss, optimizer='adam')
+            self.autoencoder.compile(loss=sinkhorn_loss, optimizer='adam')
+            self.encoder.compile(loss=sinkhorn_loss, optimizer='adam')
         elif self.pams['loss'] != '':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')

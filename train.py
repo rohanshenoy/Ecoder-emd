@@ -9,6 +9,7 @@ import os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import scipy.stats
 
 ##from utils import plotHist
 
@@ -28,11 +29,20 @@ def normalize(data,rescaleInputToMax=False):
     for i in range(len(data)):
         if rescaleInputToMax:
             norm.append( data[i].max() )
-            data[i] = 1.*data[i]/data[i].max()
+            data[i] = 1.*data[i]/(data[i].max() if data[i].max() else 1.)
         else:
             norm.append( data[i].sum() )
-            data[i] = 1.*data[i]/data[i].sum()
+            data[i] = 1.*data[i]/(data[i].sum() if data[i].sum() else 1.)
     return data,np.array(norm)
+
+@numba.jit
+def unnormalize(norm_data,maxvals,rescaleInputToMax=False):
+    for i in range(len(norm_data)):
+        if rescaleInputToMax:
+            norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].max() if norm_data[i].max() else 1.)
+        else:
+            norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].sum() if norm_data[i].sum() else 1.)
+    return norm_data
 
 def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40,
              stats=True, logy=False, leg=None):
@@ -52,6 +62,59 @@ def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40,
     if logy: plt.yscale('log')
     plt.savefig(odir+"/"+name+".png")
     plt.close()
+    return
+
+def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,
+             stats=True, logy=False, leg=None):
+
+    means_result = scipy.stats.binned_statistic(x, [y, y**2], bins=nbins, statistic='mean')
+    means, means2 = means_result.statistic
+    standard_deviations = np.sqrt(means2 - means**2)
+    bin_edges = means_result.bin_edges
+    bin_centers = (bin_edges[:-1] + bin_edges[1:])/2.
+    
+    plt.figure(figsize=(6,4))
+
+    plt.errorbar(x=bin_centers, y=means, yerr=standard_deviations, linestyle='none', marker='.', label=leg)
+
+    # if leg:
+    #     plt.hist(vals,nbins,label=leg)
+    # else:
+    #     plt.hist(vals,nbins)
+    ax = plt.axes()
+    plt.text(0.1, 0.9, name,transform=ax.transAxes)
+    plt.xlabel(xtitle)
+    plt.ylabel(ytitle)
+    if logy: plt.yscale('log')
+    plt.savefig(odir+"/"+name+".png")
+    plt.close()
+    return bin_centers, means, standard_deviations
+
+def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.'):
+
+    centers = results[0][1][0]
+    print (centers)
+    wid = centers[1]-centers[0]
+    offset = 0.1*wid
+
+    plt.figure(figsize=(6,4))
+
+    for ir,r in enumerate(results):
+        lab = r[0]
+        dat = r[1]
+        off = offset * (ir-1)/2 * (-1. if ir%2 else 1.) # .1 left, .1 right, .2 left, ...
+        plt.errorbar(x=dat[0], y=dat[1], yerr=dat[2], label=lab)
+        #plt.errorbar(x=r[0], y=r[1], yerr=r[2], linestyle='none', marker='.', label=leg)
+
+    ax = plt.axes()
+    plt.text(0.1, 0.9, name, transform=ax.transAxes)
+    plt.xlabel(xtitle)
+    plt.ylabel(ytitle)
+    plt.legend()
+    #if logy: plt.yscale('log')
+    plt.savefig(odir+"/"+name+".png")
+    plt.close()
+
     return
 
 def split(shaped_data, validation_frac=0.2):
@@ -114,6 +177,8 @@ def save_models(autoencoder, name):
 
 ### cross correlation of input/output 
 def cross_corr(x,y):
+    if (np.sum(x)==0): return -1.
+    if (np.sum(y)==0): return -0.5
     cov = np.cov(x.flatten(),y.flatten())
     std = np.sqrt(np.diag(cov))
     stdsqr = np.multiply.outer(std, std)
@@ -121,6 +186,8 @@ def cross_corr(x,y):
     return corr[0,1]
 
 def ssd(x,y):
+    if (np.sum(x)==0): return -1.
+    if (np.sum(y)==0): return -0.5
     if (np.sum(x)==0 or np.sum(y)==0): return 1.
     ssd=np.sum(((x-y)**2).flatten())
     ssd = ssd/(np.sum(x**2)*np.sum(y**2))**0.5
@@ -141,10 +208,19 @@ hexCoords = np.array([
     [2.6162605, -13.594498], [0.5232506, -12.386101], [-1.5697594, -11.177696], [-3.6627693, -9.969299], 
     [0.5232506, -14.802895], [-1.5697594, -13.594498], [-3.6627693, -12.386101], [-5.7557793, -11.177696], 
     [-1.5697594, -16.0113], [-3.6627693, -14.802895], [-5.7557793, -13.594498], [-7.848793, -12.386101]])
+#normalize so that distance between small cells (there are 4 per TC) is 1
+oneHexCell = 0.5 * 2.4168015
+#oneHexCell = 0.5 * np.min(ot.dist(hexCoords[:16],hexCoords[:16],'euclidean'))
+hexCoords = hexCoords / oneHexCell
+# for later normalization
+HexSigmaX = np.std(hexCoords[:,0]) 
+HexSigmaY = np.std(hexCoords[:,1])
+# pairwise distances
 hexMetric = ot.dist(hexCoords, hexCoords, 'euclidean')
-MAXDIST = 16.08806614
+MAXDIST = np.max(hexMetric)
 def emd(_x, _y, threshold=-1):
-    if (np.sum(_x)==0 or np.sum(_y)==0): return MAXDIST
+    if (np.sum(_x)==0): return -1.
+    if (np.sum(_y)==0): return -0.5
     x = np.array(_x, dtype=np.float64)
     y = np.array(_y, dtype=np.float64)
     x = (1./x.sum() if x.sum() else 1.)*x.flatten()
@@ -160,33 +236,53 @@ def emd(_x, _y, threshold=-1):
     return ot.emd2(x, y, hexMetric)
 
 def d_weighted_mean(x, y):
-    if (np.sum(x)==0 or np.sum(y)==0): return MAXDIST/2.
+    if (np.sum(x)==0): return -1.
+    if (np.sum(_y)==0): return -0.5
     x = (1./x.sum() if x.sum() else 1.)*x.flatten()
     y = (1./y.sum() if y.sum() else 1.)*y.flatten()
     dx = hexCoords[:,0].dot(x-y)
     dy = hexCoords[:,1].dot(x-y)
     return np.sqrt(dx*dx+dy*dy)
 
-def make_supercells(inQ, shareQ=False):
+def get_rms(coords, weights):
+    mu_x = coords[:,0].dot(weights)
+    mu_y = coords[:,1].dot(weights)
+    sig2 = np.power((coords[:,0]-mu_x)/HexSigmaX, 2) \
+         + np.power((coords[:,1]-mu_y)/HexSigmaY, 2)
+    w2 = np.power(weights,2)
+    return np.sqrt(sig2.dot(w2))
+    
+def d_weighted_rms(a, b):
+    if (np.sum(a)==0): return -1.
+    if (np.sum(b)==0): return -0.5
+    # weights
+    a = (1./a.sum() if a.sum() else 1.)*a.flatten()
+    b = (1./b.sum() if b.sum() else 1.)*b.flatten()
+    return get_rms(hexCoords,a) - get_rms(hexCoords,b)
+
+STC4mask = np.array([
+    [ 0,  1,  4,  5], #indices for 1 super trigger cell
+    [ 2,  3,  6,  7],
+    [ 8,  9, 12, 13],
+    [10, 11, 14, 15],
+    [16, 17, 20, 21],
+    [18, 19, 22, 23],
+    [24, 25, 28, 29],
+    [26, 27, 30, 31],
+    [32, 33, 36, 37],
+    [34, 35, 38, 39],
+    [40, 41, 44, 45],
+    [43, 43, 46, 47]])
+STC16mask = np.array(range(16))
+STC16mask = np.array([STC16mask,STC16mask+16,STC16mask+32])
+
+def make_supercells(inQ, shareQ=False, stc16=True):
     outQ = inQ.copy()
     inshape = inQ[0].shape
-    mask = np.array([
-        [ 0,  1,  4,  5], #indices for 1 supercell
-        [ 2,  3,  6,  7],
-        [ 8,  9, 12, 13],
-        [10, 11, 14, 15],
-        [16, 17, 20, 21],
-        [18, 19, 22, 23],
-        [24, 25, 28, 29],
-        [26, 27, 30, 31],
-        [32, 33, 36, 37],
-        [34, 35, 38, 39],
-        [40, 41, 44, 45],
-        [43, 43, 46, 47]])
     for i in range(len(inQ)):
         inFlat = inQ[i].flatten()
         outFlat = outQ[i].flatten()
-        for sc in mask:
+        for sc in (STC16mask if stc16 else STC4mask):
             # set max cell to sum
             if shareQ:
                 mysum = np.sum( inFlat[sc] )
@@ -199,12 +295,14 @@ def make_supercells(inQ, shareQ=False):
         outQ[i] = outFlat.reshape(inshape)
     return outQ
 
-def threshold(_x, norm, cut):
-    x = _x.copy()
-    # reshape to allow broadcasting to all cells
-    norm_shape = norm.reshape((norm.shape[0],)+(1,)*(x.ndim-1))
-    x = np.where(x*norm_shape>=cut,x,0)
-    return x
+# unused
+# def threshold(_x, cut):
+#     x = _x.copy()
+#     # # reshape to allow broadcasting to all cells
+#     # norm_shape = norm.reshape((norm.shape[0],)+(1,)*(x.ndim-1))
+#     # x = np.where(x*norm_shape>=cut,x,0)
+#     x = np.where(x>=cut,x,0)
+#     return x
 
 def visDisplays(index,input_Q,decoded_Q,encoded_Q=np.array([]),name='model_X'):
     Nevents = len(index)
@@ -302,10 +400,10 @@ def trainCNN(options, args, pam_updates=None):
     print("Is GPU available? ", tf.test.is_gpu_available())
 
     # default precisions for quantized training
-    nBits_input  = {'total': 32, 'integer': 4}
-    nBits_accum  = {'total': 32, 'integer': 4}
-    nBits_weight = {'total': 32, 'integer': 4}
-    nBits_encod  = {'total': 32, 'integer': 4}
+    nBits_input  = {'total': 16, 'integer': 6}
+    nBits_accum  = {'total': 16, 'integer': 6}
+    nBits_weight = {'total': 16, 'integer': 6}
+    nBits_encod  = {'total': 16, 'integer': 6}
     # model-dependent -- use common weights unless overridden
     conv_qbits = nBits_weight
     dense_qbits = nBits_weight
@@ -323,8 +421,9 @@ def trainCNN(options, args, pam_updates=None):
         print(data.shape)
         data.describe()
     else:
-        data = pd.read_csv(options.inputFile,dtype=np.float64)
-    #data = pd.read_csv(options.inputFile,dtype=np.float64)  ## big  300k file
+        data = pd.read_csv(options.inputFile, dtype=np.float64, usecols=[*range(1, 49)])
+        data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
+    occupancy_all = np.count_nonzero(data.values,axis=1)
     normdata,maxdata = normalize(data.values.copy(),rescaleInputToMax=options.rescaleInputToMax)
 
     arrange8x8 = np.array([
@@ -335,8 +434,7 @@ def trainCNN(options, args, pam_updates=None):
         47,43,39,35,35,34,33,32,
         46,42,38,34,39,38,37,36,
         45,41,37,33,43,42,41,40,
-        44,40,36,32,47,46,45,44])
-    
+        44,40,36,32,47,46,45,44])    
     arrMask  =  np.array([
         1,1,1,1,1,1,1,1,
         1,1,1,1,1,1,1,1,
@@ -346,7 +444,6 @@ def trainCNN(options, args, pam_updates=None):
         1,1,1,0,0,1,1,1,
         1,1,0,0,0,0,0,1,
         1,0,0,0,0,0,0,1,])
-    
     arrange443 = np.array([0,16, 32,
                            1,17, 33,
                            2,18, 34,
@@ -370,7 +467,11 @@ def trainCNN(options, args, pam_updates=None):
                  'channels_first': False,
                  'arrange': arrange443,
                  'encoded_dim': 10,
-                 'loss': 'weightedMSE'}},
+                 'loss': 'weightedMSE',
+                 # 'loss': 'kullback_leibler_divergence',
+                 # 'loss': 'mse',
+                 # 'loss': 'telescopeMSE',
+        }},
         # {'name': '4x4_norm_v7', 'ws': '',
         #  'pams': {'shape': (4, 4, 3),
         #           'channels_first': False,
@@ -493,17 +594,21 @@ def trainCNN(options, args, pam_updates=None):
             print ('updated parameters for model',m['name'])
 
     # compression algorithms, autoencoder and more traditional benchmarks
-    algnames = ['ae','stc1','stc2','thr_lo','thr_hi']
+    algnames = ['ae','stc','thr_lo','thr_hi']
     # metrics to compute on the validation dataset
-    metrics = {'cross_corr'    :cross_corr,
-               'SSD'      :ssd,
-               'EMD'      :emd,
-               'dMean':d_weighted_mean,
-               'zero_frac':(lambda x,y: np.all(y==0)),}
-    longMetric = {'cross_corr'    :'cross correlation',
-                  'SSD'      :'sum of squared differences',
-                  'EMD'      :'earth movers distance',
+    metrics = {
+        #'cross_corr'    :cross_corr,
+        'SSD'      :ssd,
+        'EMD'      :emd,
+        #'dMean':d_weighted_mean,
+        #'dRMS':d_weighted_rms,
+        #'zero_frac':(lambda x,y: np.all(y==0)),
+    }
+    longMetric = {'cross_corr':'cross correlation',
+                  'SSD':'sum of squared differences',
+                  'EMD':'earth movers distance',
                   'dMean':'difference in energy-weighted mean',
+                  'dRMS':'difference in energy-weighted RMS',
                   'zero_frac':'zero fraction',}
     summary_entries=['name','en_pams','tot_pams']
     for algname in algnames:
@@ -516,9 +621,13 @@ def trainCNN(options, args, pam_updates=None):
     orig_dir = os.getcwd()
     if not os.path.exists(options.odir): os.mkdir(options.odir)
     os.chdir(options.odir)
+    # plot occupancy once
+    if(not options.skipPlot): 
+        plotHist(occupancy_all.flatten(),"occ_all",xtitle="occupancy",ytitle="evts",
+                 stats=False,logy=True)
     for model in models:
         model_name = model['name']
-        if options.quantize: 
+        if options.quantize:
             bit_str = GetBitsString(model['pams']['nBits_input'], model['pams']['nBits_accum'],
                                     model['pams']['nBits_weight'], model['pams']['nBits_encod'],
                                     (model['pams']['nBits_dense'] if 'nBits_dense'  in model['pams'] else False),
@@ -538,6 +647,11 @@ def trainCNN(options, args, pam_updates=None):
         m_autoCNN , m_autoCNNen         = m.get_models()
         val_max = maxdata[val_ind]
 
+        if options.maxVal>0:
+            print('clipping outputs')
+            val_input = val_input[:options.maxVal]
+            val_max = val_max[:options.maxVal]
+
         if model['ws']=='':
             if options.quickTrain: train_input = train_input[:5000]
             history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
@@ -547,55 +661,73 @@ def trainCNN(options, args, pam_updates=None):
         summary_dict = {
             'name':model_name,
             'en_pams' : m_autoCNNen.count_params(),
-            'tot_pams': m_autoCNN.count_params(),}
+            'tot_pams': m_autoCNN.count_params(),
+        }
 
-        input_Q,cnn_deQ ,cnn_enQ   = m.predict(val_input)
-        
+        print("Evaluate AE")
+        input_Q, cnn_deQ, cnn_enQ = m.predict(val_input)
+        # re-normalize outputs of AE for comparisons
+        print("Restore normalization")
+        ae_out = unnormalize(cnn_deQ.copy(), val_max, rescaleInputToMax=options.rescaleInputToMax)
+        ae_out_frac = normalize(cnn_deQ.copy())
+        input_Q_abs = np.array([input_Q[i]*val_max[i] for i in range(0,len(input_Q))])
+
+        print("Save CSVs")
         ## csv files for RTL verification
         N_csv= (options.nCSV if options.nCSV>=0 else input_Q.shape[0]) # about 80k
         np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
         np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
         np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
-        
-        stc1_Q = make_supercells(input_Q)
-        stc2_Q = make_supercells(input_Q,shareQ=True)
-        thr_lo_Q = threshold(input_Q,val_max,47) # 1.35 transverse MIPs
-        thr_hi_Q = threshold(input_Q,val_max,69) # 2.0  transverse MIPs
+
+        print("Running non-AE algorithms")
+        thr_lo_Q = np.where(input_Q_abs>47,input_Q_abs,0) # 1.35 transverse MIPs
+        stc16_Q = make_supercells(input_Q_abs)
+        # thr_hi_Q = np.where(input_Q_abs>47,input_Q_abs,0) # 2.0  transverse MIPs
+        alg_outs = {
+            'ae' : ae_out,
+            'stc': stc16_Q,
+            'thr_lo': thr_lo_Q,
+            #'thr_hi': thr_hi_Q,
+        }
+
         occupancy = np.count_nonzero(input_Q.reshape(len(input_Q),48),axis=1)
-        alg_outs = {'ae' : cnn_deQ,
-                    'stc1': stc1_Q,
-                    'stc2': stc2_Q,
-                    'thr_lo': thr_lo_Q,
-                    'thr_hi': thr_hi_Q,
-                }
+        if(not options.skipPlot): plotHist(occupancy.flatten(),"occ",xtitle="occupancy",ytitle="evts",
+                                               stats=False,logy=True)
 
         # to generate event displays
         Nevents = 8
         index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
 
+        # keep track of plot results
+        plots={}
+
         # compute metrics for each alg
         for algname, alg_out in alg_outs.items():
+            print('Calculating metrics for '+algname)
             # charge fraction comparison
-            if(not options.skipPlot): plotHist([input_Q.flatten(),alg_out.flatten()],
+            if False and (not options.skipPlot): plotHist([input_Q.flatten(),alg_out.flatten()],
                                                algname+"_fracQ",xtitle="charge fraction",ytitle="Cells",
                                                stats=False,logy=True,leg=['input','output'])
-            input_Q_abs = np.array([input_Q[i]*val_max[i] for i in range(0,len(input_Q))])
-            alg_out_abs = np.array([alg_out[i]*val_max[i] for i in range(0,len(alg_out))])
-            if(not options.skipPlot): plotHist([input_Q_abs.flatten(),alg_out_abs.flatten()],
+            # abs charge comparison
+            if(not options.skipPlot): plotHist([input_Q_abs.flatten(),alg_out.flatten()],
                                                algname+"_absQ",xtitle="absolute charge",ytitle="Cells",
                                                stats=False,logy=True,leg=['input','output'])
             # event displays
             if(not options.skipPlot): visDisplays(index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
             for mname, metric in metrics.items():
+                print('  '+mname)
                 name = mname+"_"+algname
-                vals = np.array([metric(input_Q[i],alg_out[i]) for i in range(0,len(input_Q))])
-                vals = np.sort(vals)
+                vals = np.array([metric(input_Q_abs[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
                 model[name]        = np.round(np.mean(vals), 3)
                 model[name+'_err'] = np.round(np.std(vals), 3)
                 summary_dict[name]        = model[name]
                 summary_dict[name+'_err'] = model[name+'_err']
                 if(not options.skipPlot) and (not('zero_frac' in mname)):
                     plotHist(vals,"hist_"+name,xtitle=longMetric[mname])
+                    plots["occ_"+name] = plotProfile(occupancy, vals,"profile_occ_"+name,
+                                                     xtitle="occupancy",ytitle=longMetric[mname])
+                    plots["chg_"+name] = plotProfile(np.log10(val_max), vals,"profile_totQ_"+name,ytitle=longMetric[mname],
+                                xtitle="log10(max charge)" if options.rescaleInputToMax else "log10(total charge)")
                     hi_index = (np.where(vals>np.quantile(vals,0.9)))[0]
                     lo_index = (np.where(vals<np.quantile(vals,0.2)))[0]
                     # visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
@@ -606,7 +738,19 @@ def trainCNN(options, args, pam_updates=None):
                         lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
                         visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
                 
-        print('summary_dict',summary_dict)
+        # overlay different metrics
+        for mname in metrics:
+            chgs=[]
+            occs=[]
+            for algname in alg_outs:
+                name = mname+"_"+algname
+                chgs += [(algname, plots["chg_"+mname+"_"+algname])]
+                occs += [(algname, plots["occ_"+mname+"_"+algname])]
+            xt = "log10(max charge)" if options.rescaleInputToMax else "log10(total charge)"
+            OverlayPlots(chgs,"overlay_chg_"+mname,xtitle=xt,ytitle=mname)
+            OverlayPlots(occs,"overlay_occ_"+mname,xtitle="occupancy",ytitle=mname)
+
+        print('Summary_dict',summary_dict)
         summary = summary.append(summary_dict, ignore_index=True)
 
         with open(model_name+"_pams.json",'w') as f:
@@ -628,6 +772,7 @@ if __name__== "__main__":
     parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
     parser.add_option("--quickTrain", action='store_true', default = False,dest="quickTrain", help="train w only 5k events for testing purposes")
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
+    parser.add_option("--maxVal", type='int', default = -1, dest="maxVal", help="n of validation events to consider")
     parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     (options, args) = parser.parse_args()
     trainCNN(options,args)
