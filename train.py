@@ -598,6 +598,9 @@ def trainCNN(options, args, pam_updates=None):
         if pam_updates:
             m['pams'].update(pam_updates)
             print ('updated parameters for model',m['name'])
+        if options.loss:
+            m['pams']['loss'] = options.loss
+        print(m)
 
     # compression algorithms, autoencoder and more traditional benchmarks
     algnames = ['ae','stc','thr_lo','thr_hi']
@@ -780,6 +783,7 @@ if __name__== "__main__":
 
     parser = optparse.OptionParser()
     parser.add_option('-o',"--odir", type="string", default = 'CNN/',dest="odir", help="input TSG ntuple")
+    parser.add_option("--loss", type="string", default = '',dest="loss", help="force loss function to use")
     parser.add_option('-i',"--inputFile", type="string", default = 'CALQ_output_10x.csv',dest="inputFile", help="input TSG ntuple")
     parser.add_option("--quantize", action='store_true', default = False,dest="quantize", help="Quantize the model with qKeras. Default precision is 16,6 for all values.")
     parser.add_option("--dryRun", action='store_true', default = False,dest="dryRun", help="dryRun")
