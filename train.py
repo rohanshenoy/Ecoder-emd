@@ -468,16 +468,45 @@ def trainCNN(options, args, pam_updates=None):
                            15,31, 47])
     
     models = [
-        {'name': '4x4_norm_d10', 'ws': '',
+        # {'name': '4x4_norm_d10', 'ws': '',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'weightedMSE',
+        #          # 'loss': 'kullback_leibler_divergence',
+        #          # 'loss': 'mse',
+        #          # 'loss': 'telescopeMSE',
+        # }},
+        {'name': 'wmse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_wMSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
         'pams': {'shape': (4, 4, 3),
                  'channels_first': False,
                  'arrange': arrange443,
                  'encoded_dim': 10,
                  'loss': 'weightedMSE',
-                 # 'loss': 'kullback_leibler_divergence',
-                 # 'loss': 'mse',
-                 # 'loss': 'telescopeMSE',
         }},
+        {'name': 'mse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_MSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        'pams': {'shape': (4, 4, 3),
+                 'channels_first': False,
+                 'arrange': arrange443,
+                 'encoded_dim': 10,
+                 'loss': 'mse',
+        }},
+        {'name': 'kl', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_KL/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        'pams': {'shape': (4, 4, 3),
+                 'channels_first': False,
+                 'arrange': arrange443,
+                 'encoded_dim': 10,
+                 'loss': 'kullback_leibler_divergence',
+        }},
+        {'name': 'tele', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_tele/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        'pams': {'shape': (4, 4, 3),
+                 'channels_first': False,
+                 'arrange': arrange443,
+                 'encoded_dim': 10,
+                 'loss': 'telescopeMSE',
+        }},
+
         # {'name': '4x4_norm_v7', 'ws': '',
         #  'pams': {'shape': (4, 4, 3),
         #           'channels_first': False,
@@ -642,6 +671,8 @@ def trainCNN(options, args, pam_updates=None):
     if(not options.skipPlot): 
         plotHist(occupancy_all.flatten(),"occ_all",xtitle="occupancy",ytitle="evts",
                  stats=False,logy=True)
+    # keep track of each models performance
+    perf_dict={}
     for model in models:
         model_name = model['name']
         if options.quantize:
@@ -718,7 +749,7 @@ def trainCNN(options, args, pam_updates=None):
 
         # keep track of plot results
         plots={}
-
+        
         # compute metrics for each alg
         for algname, alg_out in alg_outs.items():
             print('Calculating metrics for '+algname)
@@ -768,6 +799,8 @@ def trainCNN(options, args, pam_updates=None):
             OverlayPlots(chgs,"overlay_chg_"+mname,xtitle=xt,ytitle=mname)
             OverlayPlots(occs,"overlay_occ_"+mname,xtitle="occupancy",ytitle=mname)
 
+        perf_dict[model_name] = plots
+
         print('Summary_dict',summary_dict)
         summary = summary.append(summary_dict, ignore_index=True)
 
@@ -775,6 +808,23 @@ def trainCNN(options, args, pam_updates=None):
             f.write(json.dumps(m.get_pams(),indent=4))
         
         os.chdir('../')
+
+    # compare the relative performance of each model
+    if len(models)>1:
+        # overlay different metrics
+        for mname in metrics:
+            chgs=[]
+            occs=[]
+            for model_name in perf_dict:
+                plots = perf_dict[model_name]
+                name = mname+"_"+algname
+                short_model = model_name.split('_')[0]
+                chgs += [(short_model, plots["chg_"+mname+"_"+algname])]
+                occs += [(short_model, plots["occ_"+mname+"_"+algname])]
+            xt = "log10(max charge)" if options.rescaleInputToMax else "log10(total charge)"
+            OverlayPlots(chgs,"ae_comp_chg_"+mname,xtitle=xt,ytitle=mname)
+            OverlayPlots(occs,"ae_comp_occ_"+mname,xtitle="occupancy",ytitle=mname)
+
     os.chdir(orig_dir)
     print(summary)
     return summary    

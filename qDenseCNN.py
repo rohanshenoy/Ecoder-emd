@@ -277,7 +277,6 @@ class qDenseCNN:
         if self.pams['loss'] == "weightedMSE":
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
-
         elif self.pams['loss'] == 'telescopeMSE':
             self.autoencoder.compile(loss=telescopeMSE, optimizer='adam')
             self.encoder.compile(loss=telescopeMSE, optimizer='adam')
