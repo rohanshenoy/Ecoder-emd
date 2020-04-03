@@ -817,10 +817,10 @@ def trainCNN(options, args, pam_updates=None):
             occs=[]
             for model_name in perf_dict:
                 plots = perf_dict[model_name]
-                name = mname+"_"+algname
+                name = mname+"_ae"
                 short_model = model_name.split('_')[0]
-                chgs += [(short_model, plots["chg_"+mname+"_"+algname])]
-                occs += [(short_model, plots["occ_"+mname+"_"+algname])]
+                chgs += [(short_model, plots["chg_"+mname+"_ae"])]
+                occs += [(short_model, plots["occ_"+mname+"_ae"])]
             xt = "log10(max charge)" if options.rescaleInputToMax else "log10(total charge)"
             OverlayPlots(chgs,"ae_comp_chg_"+mname,xtitle=xt,ytitle=mname)
             OverlayPlots(occs,"ae_comp_occ_"+mname,xtitle="occupancy",ytitle=mname)
