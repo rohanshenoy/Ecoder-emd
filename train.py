@@ -82,8 +82,6 @@ def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,lims=None,
     bin_edges = median_result.bin_edges
     bin_centers = (bin_edges[:-1] + bin_edges[1:])/2.
 
-    print(median,hie,loe)
-
     # means_result = scipy.stats.binned_statistic(x, [y, y**2], bins=nbins, statistic='mean')
     # means, means2 = means_result.statistic
     # standard_deviations = np.sqrt(means2 - means**2)
