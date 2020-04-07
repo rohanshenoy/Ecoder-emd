@@ -66,25 +66,36 @@ def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40,
     plt.close()
     return
 
-def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,
-             stats=True, logy=False, leg=None):
+def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,lims=None,
+                stats=True, logy=False, leg=None, text=""):
 
-    means_result = scipy.stats.binned_statistic(x, [y, y**2], bins=nbins, statistic='mean')
-    means, means2 = means_result.statistic
-    standard_deviations = np.sqrt(means2 - means**2)
-    bin_edges = means_result.bin_edges
+    #median_result = scipy.stats.binned_statistic(x, y, bins=nbins, statistic='median')
+    if lims==None: lims = (x.min(),x.max())
+    median_result = scipy.stats.binned_statistic(x, y, bins=nbins, range=lims, statistic=lambda x: np.quantile(x,0.5))
+    lo_result     = scipy.stats.binned_statistic(x, y, bins=nbins, range=lims, statistic=lambda x: np.quantile(x,0.5-0.68/2))
+    hi_result     = scipy.stats.binned_statistic(x, y, bins=nbins, range=lims, statistic=lambda x: np.quantile(x,0.5+0.68/2))
+    median = np.nan_to_num(median_result.statistic)
+    hi = np.nan_to_num(hi_result.statistic)
+    lo = np.nan_to_num(lo_result.statistic)
+    hie = hi-median
+    loe = median-lo
+    bin_edges = median_result.bin_edges
     bin_centers = (bin_edges[:-1] + bin_edges[1:])/2.
+
+    print(median,hie,loe)
+
+    # means_result = scipy.stats.binned_statistic(x, [y, y**2], bins=nbins, statistic='mean')
+    # means, means2 = means_result.statistic
+    # standard_deviations = np.sqrt(means2 - means**2)
+    # bin_edges = means_result.bin_edges
+    # bin_centers = (bin_edges[:-1] + bin_edges[1:])/2.
     
     plt.figure(figsize=(6,4))
+    plt.errorbar(x=bin_centers, y=median, yerr=[loe,hie], linestyle='none', marker='.', label=leg)
 
-    plt.errorbar(x=bin_centers, y=means, yerr=standard_deviations, linestyle='none', marker='.', label=leg)
-
-    # if leg:
-    #     plt.hist(vals,nbins,label=leg)
-    # else:
-    #     plt.hist(vals,nbins)
     ax = plt.axes()
     plt.text(0.1, 0.9, name,transform=ax.transAxes)
+    if text: plt.text(0.1, 0.82, text, transform=ax.transAxes)
     plt.xlabel(xtitle)
     plt.ylabel(ytitle)
     if logy: plt.yscale('log')
@@ -92,10 +103,11 @@ def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,
     print("Saving "+pname)
     plt.savefig(pname)
     plt.close()
-    return bin_centers, means, standard_deviations
+#    return bin_centers, means, standard_deviations
+    return bin_centers, median, [loe,hie]
 
-def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.'):
-
+def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.',text=""):
+    print('overlay: ',name)
     centers = results[0][1][0]
     print (centers)
     wid = centers[1]-centers[0]
@@ -112,9 +124,10 @@ def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.'):
 
     ax = plt.axes()
     plt.text(0.1, 0.9, name, transform=ax.transAxes)
+    if text: plt.text(0.1, 0.82, text, transform=ax.transAxes)
     plt.xlabel(xtitle)
     plt.ylabel(ytitle)
-    plt.legend()
+    plt.legend(loc='upper right')
     #if logy: plt.yscale('log')
     pname = odir+"/"+name+".png"
     print("Saving "+pname)
@@ -424,13 +437,16 @@ def trainCNN(options, args, pam_updates=None):
             df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, usecols=[*range(1, 49)]))
         data = pd.concat(df_arr)
         data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
-        print(data.shape)
         data.describe()
     else:
         data = pd.read_csv(options.inputFile, dtype=np.float64, usecols=[*range(1, 49)])
         data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
+    print('input data shape:',data.shape)
+
     occupancy_all = np.count_nonzero(data.values,axis=1)
+    occupancy_all_1MT = np.count_nonzero(data.values>35,axis=1)
     normdata,maxdata = normalize(data.values.copy(),rescaleInputToMax=options.rescaleInputToMax)
+    maxdata = maxdata / 35. # normalize to units of transverse MIPs
 
     arrange8x8 = np.array([
         28,29,30,31,0,4,8,12,
@@ -468,44 +484,49 @@ def trainCNN(options, args, pam_updates=None):
                            15,31, 47])
     
     models = [
-        # {'name': '4x4_norm_d10', 'ws': '',
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'weightedMSE',
-        #          # 'loss': 'kullback_leibler_divergence',
-        #          # 'loss': 'mse',
-        #          # 'loss': 'telescopeMSE',
-        # }},
-        {'name': 'wmse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_wMSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        'pams': {'shape': (4, 4, 3),
-                 'channels_first': False,
-                 'arrange': arrange443,
-                 'encoded_dim': 10,
-                 'loss': 'weightedMSE',
-        }},
-        {'name': 'mse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_MSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        'pams': {'shape': (4, 4, 3),
-                 'channels_first': False,
-                 'arrange': arrange443,
-                 'encoded_dim': 10,
-                 'loss': 'mse',
-        }},
-        {'name': 'kl', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_KL/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        'pams': {'shape': (4, 4, 3),
-                 'channels_first': False,
-                 'arrange': arrange443,
-                 'encoded_dim': 10,
-                 'loss': 'kullback_leibler_divergence',
-        }},
-        {'name': 'tele', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_tele/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        #{'name': '4x4_norm_d10', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_tele421/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        {'name': '4x4_norm_d10', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e5_166_tele421/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
         'pams': {'shape': (4, 4, 3),
                  'channels_first': False,
                  'arrange': arrange443,
                  'encoded_dim': 10,
                  'loss': 'telescopeMSE',
         }},
+        # {'name': 'wmse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_wMSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'weightedMSE',
+        # }},
+        # {'name': 'mse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_MSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'mse',
+        # }},
+        # {'name': 'kl', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_KL/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'kullback_leibler_divergence',
+        # }},
+        # {'name': 'tele', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_tele/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'telescopeMSE',
+        # }},
+        # {'name': 'tele421', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_tele421/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'telescopeMSE',
+        # }},
 
         # {'name': '4x4_norm_v7', 'ws': '',
         #  'pams': {'shape': (4, 4, 3),
@@ -635,18 +656,15 @@ def trainCNN(options, args, pam_updates=None):
     algnames = ['ae','stc','thr_lo','thr_hi']
     # metrics to compute on the validation dataset
     metrics = {
-        #'cross_corr'    :cross_corr,
-        'SSD'      :ssd,
         'EMD'      :emd,
-        #'dMean':d_weighted_mean,
-        #'dRMS':d_weighted_rms,
-        #'zero_frac':(lambda x,y: np.all(y==0)),
     }
     if options.full:
         more_metrics = {
-            'cross_corr':cross_corr,
             'dMean':d_weighted_mean,
             'dRMS':d_weighted_rms,
+            #'zero_frac':(lambda x,y: np.all(y==0)),
+            # 'cross_corr':cross_corr,
+            # 'SSD'      :ssd,
         }
         metrics.update(more_metrics)
         
@@ -664,12 +682,25 @@ def trainCNN(options, args, pam_updates=None):
             summary_entries.append(mname+"_"+algname+"_err")
     summary = pd.DataFrame(columns=summary_entries)
 
+    # settings for occupancy plots
+    occ_nbins=12
+    occ_range=(0,24)
+    occ_bins = [0,2,5,10,15]
+    chg_nbins=20
+    chg_range=(0,200)
+    chglog_nbins=10
+    chglog_range=(0,2.5)
+    chg_bins = [0,2,5,10,50]
+
+
     orig_dir = os.getcwd()
     if not os.path.exists(options.odir): os.mkdir(options.odir)
     os.chdir(options.odir)
     # plot occupancy once
     if(not options.skipPlot): 
-        plotHist(occupancy_all.flatten(),"occ_all",xtitle="occupancy",ytitle="evts",
+        plotHist(occupancy_all.flatten(),"occ_all",xtitle="occupancy (all cells)",ytitle="evts",
+                 stats=False,logy=True)
+        plotHist(occupancy_all_1MT.flatten(),"occ_1MT",xtitle="occupancy (1 MIP_{T} cells)",ytitle="evts",
                  stats=False,logy=True)
     # keep track of each models performance
     perf_dict={}
@@ -728,7 +759,7 @@ def trainCNN(options, args, pam_updates=None):
         np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
 
         print("Running non-AE algorithms")
-        thr_lo_Q = np.where(input_Q_abs>47,input_Q_abs,0) # 1.35 transverse MIPs
+        thr_lo_Q = np.where(input_Q_abs>1.35,input_Q_abs,0) # 1.35 transverse MIPs
         stc16_Q = make_supercells(input_Q_abs)
         alg_outs = {
             'ae' : ae_out,
@@ -736,10 +767,12 @@ def trainCNN(options, args, pam_updates=None):
             'thr_lo': thr_lo_Q,
         }
         if options.full:
-            thr_hi_Q = np.where(input_Q_abs>69,input_Q_abs,0) # 2.0  transverse MIPs
+            thr_hi_Q = np.where(input_Q_abs>2.0,input_Q_abs,0) # 2.0  transverse MIPs
             alg_outs['thr_hi']=thr_hi_Q
 
-        occupancy = np.count_nonzero(input_Q.reshape(len(input_Q),48),axis=1)
+        occupancy_0MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48),axis=1)
+        occupancy_1MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48)>1.,axis=1)
+        occupancy=occupancy_0MT
         if(not options.skipPlot): plotHist(occupancy.flatten(),"occ",xtitle="occupancy",ytitle="evts",
                                                stats=False,logy=True)
 
@@ -772,11 +805,46 @@ def trainCNN(options, args, pam_updates=None):
                 summary_dict[name]        = model[name]
                 summary_dict[name+'_err'] = model[name+'_err']
                 if(not options.skipPlot) and (not('zero_frac' in mname)):
+                    # metric distribution
                     plotHist(vals,"hist_"+name,xtitle=longMetric[mname])
-                    plots["occ_"+name] = plotProfile(occupancy, vals,"profile_occ_"+name,
-                                                     xtitle="occupancy",ytitle=longMetric[mname])
-                    plots["chg_"+name] = plotProfile(np.log10(val_max), vals,"profile_totQ_"+name,ytitle=longMetric[mname],
-                                xtitle="log10(max charge)" if options.rescaleInputToMax else "log10(total charge)")
+                    # 1d profiles
+                    plots["occ_"+name] = plotProfile(occupancy_1MT, vals,"profile_occ_"+name,
+                                                     nbins=occ_nbins, lims=occ_range,
+                                                     xtitle="occupancy [1 MIP_{T} TCs]",ytitle=longMetric[mname])
+                    # plots["chg_"+name] = plotProfile(val_max, vals,"profile_maxQ_"+name,ytitle=longMetric[mname],
+                    #                                  nbins=chg_nbins, lims=chg_range,
+                    #                                  xtitle="Max TC charge [MIP_{T}]" if options.rescaleInputToMax else "TC charge sum [MIP_{T}]")
+                    plots["chg_"+name] = plotProfile(np.log10(val_max), vals,"profile_maxQ_"+name,ytitle=longMetric[mname],
+                                                     nbins=chglog_nbins, lims=chglog_range,
+                                                     xtitle="log10(Max TC charge/MIP_{T})" if options.rescaleInputToMax else "log10(Sum of TC charges/MIP_{T})")
+                    # binned profiles 
+                    for iocc, occ_lo in enumerate(occ_bins):
+                        occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
+                        occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
+                        indices = (occupancy_1MT >= occ_lo) & (occupancy_1MT < occ_hi)
+                        pname = "chg_{}occ{}_{}".format(occ_lo,occ_hi_s,name)
+                        plots[pname] = plotProfile(np.log10(val_max[indices]), vals[indices],"profile_"+pname,
+                                                   xtitle="log10(Max TC charge /MIP_{T})",
+                                                   nbins=chglog_nbins, lims=chglog_range,
+                        # plots[pname] = plotProfile(val_max[indices], vals[indices],"profile_"+pname,
+                        #                            xtitle="Max TC charge [MIP_{T}]",
+                                                   # nbins=chg_nbins, lims=chg_range,
+                                                   # xtitle="occupancy [1 MIP_{T} TCs]",
+                                                   ytitle=longMetric[mname],
+                                                   text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
+                    for ichg, chg_lo in enumerate(chg_bins):
+                        chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
+                        chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
+                        indices = (val_max >= chg_lo) & (val_max < chg_hi)
+                        pname = "occ_{}chg{}_{}".format(chg_lo,chg_hi_s,name)
+                        plots[pname] = plotProfile(occupancy_1MT[indices], vals[indices],"profile_"+pname,
+                                                   xtitle="occupancy [1 MIP_{T} TCs]",
+                                                   ytitle=longMetric[mname],
+                                                   nbins=occ_nbins, lims=occ_range,
+                                                   text="{} <= Max Q < {}".format(chg_lo,chg_hi_s,name))
+                        
+                        
+                    # displays
                     hi_index = (np.where(vals>np.quantile(vals,0.9)))[0]
                     lo_index = (np.where(vals<np.quantile(vals,0.2)))[0]
                     # visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
@@ -795,9 +863,29 @@ def trainCNN(options, args, pam_updates=None):
                 name = mname+"_"+algname
                 chgs += [(algname, plots["chg_"+mname+"_"+algname])]
                 occs += [(algname, plots["occ_"+mname+"_"+algname])]
-            xt = "log10(max charge)" if options.rescaleInputToMax else "log10(total charge)"
+            xt = "log10(Max TC charge /MIP_{T})" if options.rescaleInputToMax else "log10(total charge)"
             OverlayPlots(chgs,"overlay_chg_"+mname,xtitle=xt,ytitle=mname)
-            OverlayPlots(occs,"overlay_occ_"+mname,xtitle="occupancy",ytitle=mname)
+            OverlayPlots(occs,"overlay_occ_"+mname,xtitle="occupancy [1 MIP_{T} TCs]",ytitle=mname)
+
+            # binned comparisons
+            for iocc, occ_lo in enumerate(occ_bins):
+                occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
+                occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
+                pname = "chg_{}occ{}_{}".format(occ_lo,occ_hi_s,name)
+                pname = "chg_{}occ{}".format(occ_lo,occ_hi_s)
+                chgs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
+                OverlayPlots(chgs,"overlay_chg_{}_{}occ{}".format(mname,occ_lo,occ_hi_s),
+                             xtitle="log10(Max TC charge /MIP_{T})",ytitle=mname,
+                             text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
+            for ichg, chg_lo in enumerate(chg_bins):
+                chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
+                chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
+                pname = "occ_{}chg{}_{}".format(chg_lo,chg_hi_s,name)
+                pname = "occ_{}chg{}".format(chg_lo,chg_hi_s)
+                chgs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
+                OverlayPlots(chgs,"overlay_occ_{}_{}chg{}".format(mname,chg_lo,chg_hi_s),
+                             xtitle="occupancy [1 MIP_{T} TCs]", ytitle=mname,
+                             text="{} <= Max Q < {}".format(chg_lo,chg_hi_s,name))
 
         perf_dict[model_name] = plots
 
@@ -810,7 +898,7 @@ def trainCNN(options, args, pam_updates=None):
         os.chdir('../')
 
     # compare the relative performance of each model
-    if len(models)>1:
+    if len(models)>1 and (not options.skipPlot):
         # overlay different metrics
         for mname in metrics:
             chgs=[]
@@ -824,6 +912,32 @@ def trainCNN(options, args, pam_updates=None):
             xt = "log10(max charge)" if options.rescaleInputToMax else "log10(total charge)"
             OverlayPlots(chgs,"ae_comp_chg_"+mname,xtitle=xt,ytitle=mname)
             OverlayPlots(occs,"ae_comp_occ_"+mname,xtitle="occupancy",ytitle=mname)
+            
+            # # binned profiles 
+            # for iocc, occ_lo in enumerate(occ_bins):
+            #     occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
+            #     occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
+
+            #     for model_name in perf_dict:
+            #     plots = perf_dict[model_name]
+            #     name = mname+"_ae"
+            #     short_model = model_name.split('_')[0]
+            #     chgs += [(short_model, plots["chg_"+mname+"_ae"])]
+            #     occs += [(short_model, plots["occ_"+mname+"_ae"])]
+
+            #     pname = "maxQ_{}occ{}_{}".format(occ_lo,occ_hi_s,name)
+
+            #     plots[pname] = plotProfile(np.log10(val_max[indices]), vals[indices],"profile_"+pname,
+            #                                xtitle="log10(Max TC charge /MIP_{T})",
+            #                                nbins=chglog_nbins, lims=chglog_range,
+            #                                ytitle=longMetric[mname],
+            #                                text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
+            # for ichg, chg_lo in enumerate(chg_bins):
+            #     chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
+            #     chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
+            #     indices = (val_max >= chg_lo) & (val_max < chg_hi)
+            #     pname = "occ_{}chg{}_{}".format(chg_lo,chg_hi_s,name)
+                # plots[pname] = plotProfile(occupancy_1MT[indices], vals[indices],"profile_"+pname,
 
     os.chdir(orig_dir)
     print(summary)

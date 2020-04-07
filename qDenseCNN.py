@@ -87,7 +87,8 @@ def telescopeMSE(y_true, y_pred):
     #lossTC3 = K.mean(K.square(y_true_3 - y_pred_3) * K.maximum(y_pred_3, y_true_3), axis=(-1))
 
     # sum MSEs
-    return lossTC1 + lossTC2 + lossTC3
+    #return lossTC1 + lossTC2 + lossTC3
+    return 4*lossTC1 + 2*lossTC2 + lossTC3
 
 
 class qDenseCNN:
