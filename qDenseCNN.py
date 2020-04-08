@@ -14,6 +14,8 @@ import json
 import ot_tf
 import ot
 
+from telescope import telescopeMSE2
+
 hexCoords = np.array([ 
     [0.0, 0.0], [0.0, -2.4168015], [0.0, -4.833603], [0.0, -7.2504044], 
     [2.09301, -1.2083969], [2.09301, -3.6251984], [2.09301, -6.042], [2.09301, -8.458794], 
@@ -71,20 +73,20 @@ def telescopeMSE(y_true, y_pred):
     # TC-level MSE
     y_pred_rs = K.reshape(y_pred, (-1,48))
     y_true_rs = K.reshape(y_true, (-1,48))
-    lossTC1 = K.mean(K.square(y_true_rs - y_pred_rs), axis=(-1))
-    #lossTC1 = K.mean(K.square(y_true_rs - y_pred_rs) * K.maximum(y_pred_rs, y_true_rs), axis=(-1))
+    # lossTC1 = K.mean(K.square(y_true_rs - y_pred_rs), axis=(-1))
+    lossTC1 = K.mean(K.square(y_true_rs - y_pred_rs) * K.maximum(y_pred_rs, y_true_rs), axis=(-1))
 
     # map TCs to 2x2 supercells and compute MSE
     y_pred_12 = tf.matmul(y_pred_rs, tf_Remap_48_12)
     y_true_12 = tf.matmul(y_true_rs, tf_Remap_48_12)
-    lossTC2 = K.mean(K.square(y_true_12 - y_pred_12), axis=(-1))
-    #lossTC2 = K.mean(K.square(y_true_12 - y_pred_12) * K.maximum(y_pred_12, y_true_12), axis=(-1))
+    # lossTC2 = K.mean(K.square(y_true_12 - y_pred_12), axis=(-1))
+    lossTC2 = K.mean(K.square(y_true_12 - y_pred_12) * K.maximum(y_pred_12, y_true_12), axis=(-1))
   
     # map 2x2 supercells to 4x4 supercells and compute MSE
     y_pred_3 = tf.matmul(y_pred_12, tf_Remap_12_3)
     y_true_3 = tf.matmul(y_true_12, tf_Remap_12_3)
-    lossTC3 = K.mean(K.square(y_true_3 - y_pred_3), axis=(-1))
-    #lossTC3 = K.mean(K.square(y_true_3 - y_pred_3) * K.maximum(y_pred_3, y_true_3), axis=(-1))
+    # lossTC3 = K.mean(K.square(y_true_3 - y_pred_3), axis=(-1))
+    lossTC3 = K.mean(K.square(y_true_3 - y_pred_3) * K.maximum(y_pred_3, y_true_3), axis=(-1))
 
     # sum MSEs
     #return lossTC1 + lossTC2 + lossTC3
@@ -279,8 +281,8 @@ class qDenseCNN:
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
         elif self.pams['loss'] == 'telescopeMSE':
-            self.autoencoder.compile(loss=telescopeMSE, optimizer='adam')
-            self.encoder.compile(loss=telescopeMSE, optimizer='adam')
+            self.autoencoder.compile(loss=telescopeMSE2, optimizer='adam')
+            self.encoder.compile(loss=telescopeMSE2, optimizer='adam')
         elif self.pams['loss'] == 'sink':
             self.autoencoder.compile(loss=sinkhorn_loss, optimizer='adam')
             self.encoder.compile(loss=sinkhorn_loss, optimizer='adam')

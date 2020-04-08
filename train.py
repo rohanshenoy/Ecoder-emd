@@ -48,9 +48,11 @@ def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40,lims=None,
              stats=True, logy=False, leg=None):
     plt.figure(figsize=(6,4))
     if leg:
-        plt.hist(vals, nbins, range=lims, label=leg)
+        n, bins, patches = plt.hist(vals, nbins, range=lims, label=leg)
     else:
-        plt.hist(vals, nbins, range=lims)
+        n, bins, patches = plt.hist(vals, nbins, range=lims)
+    # print('bins',bins)
+    # print('n',n)
     ax = plt.gca()
     plt.text(0.1, 0.9, name,transform=ax.transAxes)
     if stats:
@@ -440,6 +442,11 @@ def trainCNN(options, args, pam_updates=None):
         data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
     print('input data shape:',data.shape)
 
+    # plotHist(data.values.flatten(),"TCQ_all",xtitle="Q (all cells)",ytitle="TCs",
+    #              stats=False,logy=True,nbins=200,lims=[-0.5,199.5])
+    # above 20 ADCs, distribution is approx f(x) = -8.05067e+03 + 1.26147e+06/x + 1.48390e+08/x^2
+    # for nelink=2 sample
+
     occupancy_all = np.count_nonzero(data.values,axis=1)
     occupancy_all_1MT = np.count_nonzero(data.values>35,axis=1)
     normdata,maxdata = normalize(data.values.copy(),rescaleInputToMax=options.rescaleInputToMax)
@@ -482,20 +489,37 @@ def trainCNN(options, args, pam_updates=None):
     
     models = [
         #{'name': '4x4_norm_d10', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_tele421/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        {'name': '4x4_norm_d10', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e5_166_tele421/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        #{'name': 'tele421', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e5_166_tele421/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # {'name': '4x4_norm_d10', 'ws': '',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'telescopeMSE',
+        #      }},
+        {'name': 'tele421wV1', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr6_e2_166_tele421w/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # {'name': '4x4_norm_d10', 'ws': '',
         'pams': {'shape': (4, 4, 3),
                  'channels_first': False,
                  'arrange': arrange443,
                  'encoded_dim': 10,
                  'loss': 'telescopeMSE',
         }},
-        {'name': 'wmse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_wMSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        {'name': 'tele421wV2', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr6_e2_166_tele2_421w/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # {'name': '4x4_norm_d10', 'ws': '',
         'pams': {'shape': (4, 4, 3),
                  'channels_first': False,
                  'arrange': arrange443,
                  'encoded_dim': 10,
-                 'loss': 'weightedMSE',
+                 'loss': 'telescopeMSE',
         }},
+        # {'name': 'wmse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_wMSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'weightedMSE',
+        # }},
         # {'name': 'mse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_MSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
         # 'pams': {'shape': (4, 4, 3),
         #          'channels_first': False,
