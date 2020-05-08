@@ -44,6 +44,10 @@ def unnormalize(norm_data,maxvals,rescaleInputToMax=False):
             norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].sum() if norm_data[i].sum() else 1.)
     return norm_data
 
+def StringToTextFile(fname,s):
+    with open(fname,'w') as f:
+        f.write(s)
+
 def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40,lims=None,
              stats=True, logy=False, leg=None):
     plt.figure(figsize=(6,4))
@@ -64,6 +68,8 @@ def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40,lims=None,
     if logy: plt.yscale('log')
     pname = odir+"/"+name+".pdf"
     print("Saving "+pname)
+    tname = pname.replace('.pdf','.txt')
+    StringToTextFile(tname, "{}, {}, {}, \t {}, {}, \n".format(np.quantile(vals,0.5), np.quantile(vals,0.5-0.68/2), np.quantile(vals,0.5+0.68/2), np.mean(vals), np.std(vals)))
     plt.savefig(pname)
     plt.close()
     return
@@ -93,6 +99,10 @@ def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,lims=None,
     plt.figure(figsize=(6,4))
     plt.errorbar(x=bin_centers, y=median, yerr=[loe,hie], linestyle='none', marker='.', label=leg)
 
+    printstr=""
+    for i,b in enumerate(bin_centers):
+        printstr += "{} {} {} {} \n".format(b, median[i], loe[i], hie[i])
+
     ax = plt.gca()
     plt.text(0.1, 0.9, name,transform=ax.transAxes)
     if text: plt.text(0.1, 0.82, text.replace('MAX','inf'), transform=ax.transAxes)
@@ -101,6 +111,8 @@ def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,lims=None,
     if logy: plt.yscale('log')
     pname = odir+"/"+name+".pdf"
     print("Saving "+pname)
+    tname = pname.replace('.pdf','.txt')
+    StringToTextFile(tname, printstr)
     plt.savefig(pname)
     plt.close()
 #    return bin_centers, means, standard_deviations
@@ -423,8 +435,8 @@ def trainCNN(options, args, pam_updates=None):
     nBits_weight = {'total': 16, 'integer': 6}
     nBits_encod  = {'total': 16, 'integer': 6}
     # model-dependent -- use common weights unless overridden
-    conv_qbits = nBits_weight
-    dense_qbits = nBits_weight
+    # conv_qbits = nBits_weight
+    # dense_qbits = nBits_weight
     
   
     # from tensorflow.keras import backend
@@ -444,8 +456,11 @@ def trainCNN(options, args, pam_updates=None):
 
     # plotHist(data.values.flatten(),"TCQ_all",xtitle="Q (all cells)",ytitle="TCs",
     #              stats=False,logy=True,nbins=200,lims=[-0.5,199.5])
-    # above 20 ADCs, distribution is approx f(x) = -8.05067e+03 + 1.26147e+06/x + 1.48390e+08/x^2
+    # from 20 to 200 ADCs, distribution is approx f(x) = -8.05067e+03 + 1.26147e+06/x + 1.48390e+08/x^2
     # for nelink=2 sample
+    # >>> f2 =  ROOT.TF1( "f2", "[1]/x+[0]+[2]/pow(x,2)",20,199)
+    # >>> h.Fit(f2,"","",20,199)
+
 
     occupancy_all = np.count_nonzero(data.values,axis=1)
     occupancy_all_1MT = np.count_nonzero(data.values>35,axis=1)
@@ -486,33 +501,169 @@ def trainCNN(options, args, pam_updates=None):
                            13,29, 45,
                            14,30, 46,
                            15,31, 47])
+
+
+    # 2 e-link #s
+    nBits_input  = {'total':  9, 'integer': 2} # actually 8,2 unsigned
+    nBits_accum  = {'total': 10, 'integer': 2}
+    nBits_weight = {'total':  6, 'integer': 1}
+    nBits_encod  = {'total':  4, 'integer': 1}
+
+    # fixes for inputs
+    nBits_input  = {'total': 16, 'integer': 6}
+    nBits_accum  = {'total': 16, 'integer': 6}
+
+
+    # Fix # weights in bins (present as scan over output nodes)
+    # 4b/10b output: 128*16 * 6b = 12 288
+    # 5b/12b output: 128*12 * 8b = 12 288
+    # 6b/15b output: 128*10 * 10b = 12 800
+    # 8b/20b output: 128* 8 * 12b = 12 288
+    # 10b/25b output:128* 6 * 16b = 12 288
+    # (output precision) 2/5 links --- 128*out * (weight precision)
+
+    """
+
+    # 4b/10b output: 128*16 * 6b = 12 288
+    #nBits_encod  = {'total':  4, 'integer': 1}
+    nBits_encod  = {'total': 10, 'integer': 1}
+    nBits_weight = {'total':  6, 'integer': 1}
+    edim = 16
+
+    # 5b/12b output: 128*12 * 8b = 12 288
+    #nBits_encod  = {'total':  5, 'integer': 1}
+    nBits_encod  = {'total': 12, 'integer': 1}
+    nBits_weight = {'total':  8, 'integer': 1}
+    edim = 12
+
+    # 6b/15b output: 128*10 * 10b = 12 800
+    #nBits_encod  = {'total':  6, 'integer': 1}
+    nBits_encod  = {'total':  15, 'integer': 1}
+    nBits_weight = {'total': 10, 'integer': 1}
+    edim = 10
+
+    # 8b/20b output: 128* 8 * 12b = 12 288
+    #nBits_encod  = {'total':  8, 'integer': 1}
+    nBits_encod  = {'total':  20, 'integer': 1}
+    nBits_weight = {'total': 12, 'integer': 1}
+    edim = 8
+
+    """
+
+    # 10b/25b output:128* 6 * 16b = 12 288
+    #nBits_encod  = {'total': 10, 'integer': 1}
+    nBits_encod  = {'total': 25, 'integer': 1}
+    nBits_weight = {'total': 16, 'integer': 1}
+    edim = 6
     
+
+    mymodname = "may7v2_2elink_{}out{}b{}_{}b{}weights".format(edim,
+                                                             nBits_encod['total'], nBits_encod['integer'],
+                                                             nBits_weight['total'], nBits_weight['integer'])
+
+
     models = [
-        #{'name': '4x4_norm_d10', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_tele421/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        #{'name': 'tele421', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e5_166_tele421/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # {'name': '4x4_norm_d10', 'ws': '',
+        # {'name': mymodname, 'ws': '', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': edim,
+        #          'loss': 'telescopeMSE',
+        #      }},
+
+        {'name': '16-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_16out/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
+        'pams': {'shape': (4, 4, 3),
+                 'channels_first': False,
+                 'arrange': arrange443,
+                 'encoded_dim': 16,
+                 'loss': 'telescopeMSE',
+             }},
+        # {'name': '10-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_10out/may7v2_2elink_10out6b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod6b1i/may7v2_2elink_10out6b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod6b1i.hdf5', # custom
         # 'pams': {'shape': (4, 4, 3),
         #          'channels_first': False,
         #          'arrange': arrange443,
         #          'encoded_dim': 10,
         #          'loss': 'telescopeMSE',
         #      }},
-        {'name': 'tele421wV1', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr6_e2_166_tele421w/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # {'name': '4x4_norm_d10', 'ws': '',
-        'pams': {'shape': (4, 4, 3),
-                 'channels_first': False,
-                 'arrange': arrange443,
-                 'encoded_dim': 10,
-                 'loss': 'telescopeMSE',
-        }},
-        {'name': 'tele421wV2', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr6_e2_166_tele2_421w/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # {'name': '4x4_norm_d10', 'ws': '',
-        'pams': {'shape': (4, 4, 3),
-                 'channels_first': False,
-                 'arrange': arrange443,
-                 'encoded_dim': 10,
-                 'loss': 'telescopeMSE',
-        }},
+        # {'name': '6-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_6out/may7v2_2elink_6out10b1_16b1weights_Input16b6i_Accum16b6i_Weight16b1i_Encod10b1i/may7v2_2elink_6out10b1_16b1weights_Input16b6i_Accum16b6i_Weight16b1i_Encod10b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 6,
+        #          'loss': 'telescopeMSE',
+        #      }},
+
+
+
+
+
+        # {'name': '16-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e5_16out/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
+        # {'name': '10-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e5_10out/may7v2_2elink_10out15b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod15b1i/may7v2_2elink_10out15b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod15b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'telescopeMSE',
+        #      }},
+        # {'name': '6-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e5_6out/may7v2_2elink_6out25b1_16b1weights_Input16b6i_Accum16b6i_Weight16b1i_Encod25b1i/may7v2_2elink_6out25b1_16b1weights_Input16b6i_Accum16b6i_Weight16b1i_Encod25b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 6,
+        #          'loss': 'telescopeMSE',
+        #      }},
+
+
+
+
+        # {'name': 'd10-6b2', 'ws': '', #'/home/therwig/data/sandbox/hgcal/Ecoder/apr16_elink2_enc10_6b2/4x4_norm_d10_6b3_Input16b6i_Accum16b6i_Weight16b6i_Encod6b2i/4x4_norm_d10_6b3_Input16b6i_Accum16b6i_Weight16b6i_Encod6b2i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'nBits_encod': {'total': 6, 'integer': 2},
+        #          'loss': 'telescopeMSE',
+        #      }},
+        # {'name': 'd12-5b2', 'ws': '', #'/home/therwig/data/sandbox/hgcal/Ecoder/apr16_elink2_enc12_5b2/4x4_norm_d12_5b2_Input16b6i_Accum16b6i_Weight16b6i_Encod5b2i/4x4_norm_d12_5b2_Input16b6i_Accum16b6i_Weight16b6i_Encod5b2i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 12,
+        #          'nBits_encod': {'total': 5, 'integer': 2},
+        #          'loss': 'telescopeMSE',
+        #      }},
+        # {'name': 'd15-4b1', 'ws': '', #'/home/therwig/data/sandbox/hgcal/Ecoder/apr16_elink2_enc15_4b1/4x4_norm_d15_4b1_Input16b6i_Accum16b6i_Weight16b6i_Encod4b1i/4x4_norm_d15_4b1_Input16b6i_Accum16b6i_Weight16b6i_Encod4b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 15,
+        #          'nBits_encod': {'total': 4, 'integer': 1},
+        #          'loss': 'telescopeMSE',
+        #      }},
+
+
+        # {'name': 'tele421wV1', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr6_e2_166_tele421w/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # # {'name': '4x4_norm_d10', 'ws': '',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'telescopeMSE',
+        # }},
+        # {'name': 'tele421wV2', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr6_e2_166_tele2_421w/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
+        # # {'name': '4x4_norm_d10', 'ws': '',
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 10,
+        #          'loss': 'telescopeMSE',
+        # }},
         # {'name': 'wmse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_wMSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
         # 'pams': {'shape': (4, 4, 3),
         #          'channels_first': False,
@@ -665,7 +816,8 @@ def trainCNN(options, args, pam_updates=None):
                 'nBits_weight':nBits_weight,
                 'nBits_input':nBits_input,
                 'nBits_accum':nBits_accum,
-                'nBits_encod': nBits_encod})
+                'nBits_encod': nBits_encod,
+            })
         if pam_updates:
             m['pams'].update(pam_updates)
             print ('updated parameters for model',m['name'])
@@ -780,13 +932,21 @@ def trainCNN(options, args, pam_updates=None):
         np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
 
         print("Running non-AE algorithms")
-        thr_lo_Q = np.where(input_Q_abs>1.35,input_Q_abs,0) # 1.35 transverse MIPs
-        stc16_Q = make_supercells(input_Q_abs)
-        alg_outs = {
-            'ae' : ae_out,
-            'stc': stc16_Q,
-            'thr_lo': thr_lo_Q,
-        }
+        if options.EMDonly:
+            alg_outs = {'ae' : ae_out}
+        else:
+            thr_lo_Q = np.where(input_Q_abs>1.35,input_Q_abs,0) # 1.35 transverse MIPs
+            stc16_Q = make_supercells(input_Q_abs)
+            alg_outs = {
+                'ae' : ae_out,
+                'stc': stc16_Q,
+                'thr_lo': thr_lo_Q,
+            }
+        if options.EMDonly:
+            alg_outs = {
+                'ae' : ae_out,
+            }
+
         if options.full:
             thr_hi_Q = np.where(input_Q_abs>2.0,input_Q_abs,0) # 2.0  transverse MIPs
             alg_outs['thr_hi']=thr_hi_Q
@@ -838,6 +998,18 @@ def trainCNN(options, args, pam_updates=None):
                     plots["chg_"+name] = plotProfile(np.log10(val_max), vals,"profile_maxQ_"+name,ytitle=longMetric[mname],
                                                      nbins=chglog_nbins, lims=chglog_range,
                                                      xtitle=logMaxTitle if options.rescaleInputToMax else logTotTitle)
+                    plotHist(vals[val_max<1],"hist_0chg1_"+name,xtitle=longMetric[mname])
+                    plotHist(vals[val_max<2],"hist_0chg2_"+name,xtitle=longMetric[mname])
+                    plotHist(vals[val_max<5],"hist_0chg5_"+name,xtitle=longMetric[mname])
+                    plotHist(vals[val_max<10],"hist_0chg10_"+name,xtitle=longMetric[mname])
+                    plotHist(vals[occupancy_1MT<10],"hist_0occ10_"+name,xtitle=longMetric[mname])
+                    plotHist(vals[occupancy_1MT>10],"hist_10occMAX_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[occupancy_1MT>15],"hist_15occMAX_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[occupancy_1MT>20],"hist_20occMAX_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[occupancy_1MT>30],"hist_30occMAX_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[occupancy_1MT>40],"hist_40occMAX_"+name,xtitle=longMetric[mname])
+                    plotHist(vals[vals>-1e-9],"hist_nonzero_"+name,xtitle=longMetric[mname])
+                    plotHist(np.where(vals>-1e-9,1,0),"hist_iszero_"+name,xtitle=longMetric[mname])
                     # binned profiles 
                     for iocc, occ_lo in enumerate(occ_bins):
                         occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
@@ -960,9 +1132,11 @@ if __name__== "__main__":
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
     parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
     parser.add_option("--full", action='store_true', default = False,dest="full", help="run all algorithms and metrics")
+    parser.add_option("--EMDonly", action='store_true', default = False,dest="EMDonly", help="run only EMD metric")
     parser.add_option("--quickTrain", action='store_true', default = False,dest="quickTrain", help="train w only 5k events for testing purposes")
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--maxVal", type='int', default = -1, dest="maxVal", help="n of validation events to consider")
-    parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
+    #parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
+    parser.add_option("--rescaleInputToMax", type='int', default=1, dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     (options, args) = parser.parse_args()
     trainCNN(options,args)
