@@ -111,6 +111,7 @@ class qDenseCNN:
         }
 
         self.weights_f = weights_f
+        # self.extend = False
 
     def setpams(self, in_pams):
         for k, v in in_pams.items():
@@ -217,6 +218,15 @@ class qDenseCNN:
         shape = K.int_shape(x)
         x = QActivation(accum_Qbits, name='accum1_qa')(x)
         x = Flatten(name="flatten")(x)
+        
+        # extended inputs fed forward to the dense layer
+        # if self.extend:
+        #     inputs2 = Input(shape=(2,))  # maxQ, occupancy
+            # input2_Qbits  = self.GetQbits(nBits_input, keep_negative=1) #oddly fails if keep_neg=0
+            # input2_Qbits
+            # x = inputs
+            # x = QActivation(input_Qbits, name='input_qa')(x)
+            
 
         # encoder dense nodes
         for i, n_nodes in enumerate(Dense_layer_nodes):

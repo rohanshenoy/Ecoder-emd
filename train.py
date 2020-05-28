@@ -23,22 +23,31 @@ from denseCNN import denseCNN
 #for earth movers distance calculation
 import ot
 
-@numba.jit
-def normalize(data,rescaleInputToMax=False):
-    norm =[]
-    for i in range(len(data)):
-        if rescaleInputToMax:
-            norm.append( data[i].max() )
-            data[i] = 1.*data[i]/(data[i].max() if data[i].max() else 1.)
-        else:
-            norm.append( data[i].sum() )
-            data[i] = 1.*data[i]/(data[i].sum() if data[i].sum() else 1.)
-    return data,np.array(norm)
+def double_data(data):
+    doubled=[]
+    i=0
+    while i<= len(data)-2:
+        doubled.append( data[i] + data[i+1] )
+        i+=2
+    return np.array(doubled)
 
 @numba.jit
-def unnormalize(norm_data,maxvals,rescaleInputToMax=False):
-    for i in range(len(norm_data)):
+def normalize(data,rescaleInputToMax=False):
+    maxes =[]
+    sums =[]
+    for i in range(len(data)):
+        maxes.append( data[i].max() )
+        sums.append( data[i].sum() )
         if rescaleInputToMax:
+            data[i] = 1.*data[i]/(data[i].max() if data[i].max() else 1.)
+        else:
+            data[i] = 1.*data[i]/(data[i].sum() if data[i].sum() else 1.)
+    return data,np.array(maxes),np.array(sums)
+
+@numba.jit
+def unnormalize(norm_data,maxvals,rescaleOutputToMax=False):
+    for i in range(len(norm_data)):
+        if rescaleOutputToMax:
             norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].max() if norm_data[i].max() else 1.)
         else:
             norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].sum() if norm_data[i].sum() else 1.)
@@ -73,6 +82,29 @@ def plotHist(vals,name,odir='.',xtitle="",ytitle="",nbins=40,lims=None,
     plt.savefig(pname)
     plt.close()
     return
+
+def getWeights(vals, n=None, a=None, b=None):
+    if a==None: a=min(vals)
+    if b==None: b=max(vals)
+    if n==None: b=20
+    contents, bins, patches = plt.hist(vals, n, range=(a,b))
+
+    # print("weight histo", contents)
+    # print("weight vals ", [1./c if c else 0. for c in contents])
+    
+    def _getBin(x,bins):
+        if x < bins[0]: return 0
+        if x >= bins[-1]: return len(bins)-2
+        for i in range(len(bins)-1):
+            if x>= bins[i] and x<bins[i+1]: return i
+        print ('bin logic error',x,bins)
+        return 0
+
+    _bins = np.array([_getBin(x,bins)for x in vals])
+    return np.array([1./contents[b] for b in _bins]) # must be filled by construction///
+    #return np.array([1./contents[b] if contents[b] else 1.0 for b in _bins])
+
+
 
 def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,lims=None,
                 stats=True, logy=False, leg=None, text=""):
@@ -162,12 +194,13 @@ def split(shaped_data, validation_frac=0.2):
     print('training shape',train_input.shape)
     print('validation shape',val_input.shape)
 
-    return val_input,train_input,val_index
+    return val_input,train_input,val_index,train_index
 
-def train(autoencoder,encoder,train_input,val_input,name,n_epochs=100):
+def train(autoencoder,encoder,train_input, train_weights,val_input,name,n_epochs=100):
 
     es = kr.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=3)
     history = autoencoder.fit(train_input,train_input,
+                              sample_weight=[train_weights],
                               epochs=n_epochs,
                               batch_size=500,
                               shuffle=True,
@@ -325,6 +358,17 @@ def make_supercells(inQ, shareQ=False, stc16=True):
         outQ[i] = outFlat.reshape(inshape)
     return outQ
 
+def best_choice(inQ, n):
+    outQ = inQ.copy()
+    inshape = inQ[0].shape
+    for i in range(len(inQ)):
+        inFlat = inQ[i].flatten()
+        outFlat = outQ[i].flatten()
+        outFlat[np.argsort(outFlat)[:-n]]=0
+        # get indices of all but n largest Q, set elements to zero
+        outQ[i] = outFlat.reshape(inshape)
+    return outQ
+
 # unused
 # def threshold(_x, cut):
 #     x = _x.copy()
@@ -423,6 +467,8 @@ def GetBitsString(In, Accum, Weight, Encoded, Dense=False, Conv=False):
     s += "_Encod{}b{}i".format(Encoded['total'], Encoded['integer'])
     return s
 
+def sumTCQ(x): return x.reshape(len(x),48).sum(axis=1)
+
 def trainCNN(options, args, pam_updates=None):
     # List devices:
     print(device_lib.list_local_devices())
@@ -438,6 +484,13 @@ def trainCNN(options, args, pam_updates=None):
     # conv_qbits = nBits_weight
     # dense_qbits = nBits_weight
     
+    if (options.nElinks==2 and ("nElinks_2" not in options.inputFile)) \
+       or (options.nElinks==5 and ("nElinks_5" not in options.inputFile)):
+        print ("Are you sure you're using the right input file??")
+        print ("nElinks={0} while 'nElinks_{0}' isn't in '{1}'".format(options.nElinks,options.inputFile))
+        print ("Otherwise BC, STC settings will be wrong!!")
+        print ("Exiting...")
+        exit(0)
   
     # from tensorflow.keras import backend
     # backend.set_image_data_format('channels_first')
@@ -454,6 +507,12 @@ def trainCNN(options, args, pam_updates=None):
         data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
     print('input data shape:',data.shape)
 
+    data_values = data.values
+
+    doubled_data = double_data(data_values.copy())
+    print (doubled_data.shape)
+    data_values = doubled_data
+
     # plotHist(data.values.flatten(),"TCQ_all",xtitle="Q (all cells)",ytitle="TCs",
     #              stats=False,logy=True,nbins=200,lims=[-0.5,199.5])
     # from 20 to 200 ADCs, distribution is approx f(x) = -8.05067e+03 + 1.26147e+06/x + 1.48390e+08/x^2
@@ -462,10 +521,14 @@ def trainCNN(options, args, pam_updates=None):
     # >>> h.Fit(f2,"","",20,199)
 
 
-    occupancy_all = np.count_nonzero(data.values,axis=1)
-    occupancy_all_1MT = np.count_nonzero(data.values>35,axis=1)
-    normdata,maxdata = normalize(data.values.copy(),rescaleInputToMax=options.rescaleInputToMax)
+    occupancy_all = np.count_nonzero(data_values,axis=1)
+    occupancy_all_1MT = np.count_nonzero(data_values>35,axis=1)
+    normdata,maxdata,sumdata = normalize(data_values.copy(),rescaleInputToMax=options.rescaleInputToMax)
     maxdata = maxdata / 35. # normalize to units of transverse MIPs
+    sumdata = sumdata / 35. # normalize to units of transverse MIPs
+
+    weights_occ = getWeights(occupancy_all_1MT,50,0,50)
+    weights_maxQ = getWeights(maxdata,50,0,50)
 
     arrange8x8 = np.array([
         28,29,30,31,0,4,8,12,
@@ -522,62 +585,102 @@ def trainCNN(options, args, pam_updates=None):
     # 10b/25b output:128* 6 * 16b = 12 288
     # (output precision) 2/5 links --- 128*out * (weight precision)
 
-    """
 
     # 4b/10b output: 128*16 * 6b = 12 288
-    #nBits_encod  = {'total':  4, 'integer': 1}
-    nBits_encod  = {'total': 10, 'integer': 1}
+    
+    if(options.nElinks==2):
+        nBits_encod  = {'total':  3, 'integer': 1}
+    elif(options.nElinks==5):
+        nBits_encod  = {'total': 9, 'integer': 1}
+    else:
+        print("must specify encoding bits for nElink =",options.nElinks)
+
     nBits_weight = {'total':  6, 'integer': 1}
     edim = 16
 
-    # 5b/12b output: 128*12 * 8b = 12 288
-    #nBits_encod  = {'total':  5, 'integer': 1}
-    nBits_encod  = {'total': 12, 'integer': 1}
-    nBits_weight = {'total':  8, 'integer': 1}
-    edim = 12
 
-    # 6b/15b output: 128*10 * 10b = 12 800
-    #nBits_encod  = {'total':  6, 'integer': 1}
-    nBits_encod  = {'total':  15, 'integer': 1}
-    nBits_weight = {'total': 10, 'integer': 1}
-    edim = 10
-
-    # 8b/20b output: 128* 8 * 12b = 12 288
-    #nBits_encod  = {'total':  8, 'integer': 1}
-    nBits_encod  = {'total':  20, 'integer': 1}
-    nBits_weight = {'total': 12, 'integer': 1}
-    edim = 8
-
-    """
-
-    # 10b/25b output:128* 6 * 16b = 12 288
-    #nBits_encod  = {'total': 10, 'integer': 1}
-    nBits_encod  = {'total': 25, 'integer': 1}
-    nBits_weight = {'total': 16, 'integer': 1}
-    edim = 6
-    
-
-    mymodname = "may7v2_2elink_{}out{}b{}_{}b{}weights".format(edim,
+    mymodname = "may8_2elink_{}out{}b{}_{}b{}weights".format(edim,
                                                              nBits_encod['total'], nBits_encod['integer'],
                                                              nBits_weight['total'], nBits_weight['integer'])
 
-
     models = [
-        # {'name': mymodname, 'ws': '', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': edim,
-        #          'loss': 'telescopeMSE',
-        #      }},
-
-        {'name': '16-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_16out/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
+        {'name': mymodname, 'ws': '', # custom
+        # {'name': 'no-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may27_nonquant_v7/may8_2elink_16out4b1_6b1weights/may8_2elink_16out4b1_6b1weights.hdf5', # custom
         'pams': {'shape': (4, 4, 3),
                  'channels_first': False,
                  'arrange': arrange443,
-                 'encoded_dim': 16,
+                 'encoded_dim': edim,
                  'loss': 'telescopeMSE',
              }},
+
+        # {'name': 'no-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e5_16out/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
+
+        # {'name': 'chg-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may8_Qwgt_e5_v1/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
+
+        # {'name': 'occ-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may8_OccWgt_e5_v1/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i//may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
+        # {'name': 'both-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may8_BothWgt_e5_v1/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
+
+
+        # {'name': 'no-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_16out/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
+        # {'name': 'chg-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/testtmp_may8_Qwgt_v1/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
+        # {'name': 'occ-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/testtmp_may8_OccWgt_v1/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
+        # {'name': 'both-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/testtmp_may8_bothWgt_v1/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
+
+        # {'name': '16-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_16out/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
+        # 'pams': {'shape': (4, 4, 3),
+        #          'channels_first': False,
+        #          'arrange': arrange443,
+        #          'encoded_dim': 16,
+        #          'loss': 'telescopeMSE',
+        #      }},
         # {'name': '10-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_10out/may7v2_2elink_10out6b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod6b1i/may7v2_2elink_10out6b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod6b1i.hdf5', # custom
         # 'pams': {'shape': (4, 4, 3),
         #          'channels_first': False,
@@ -826,7 +929,7 @@ def trainCNN(options, args, pam_updates=None):
         print(m)
 
     # compression algorithms, autoencoder and more traditional benchmarks
-    algnames = ['ae','stc','thr_lo','thr_hi']
+    algnames = ['ae','stc','thr_lo','thr_hi','bc']
     # metrics to compute on the validation dataset
     metrics = {
         'EMD'      :emd,
@@ -890,23 +993,31 @@ def trainCNN(options, args, pam_updates=None):
 
         if options.quantize:
             m = qDenseCNN(weights_f=model['ws'])
+            #m.extend = True # for extra inputs
         else:
             m = denseCNN(weights_f=model['ws'])
         m.setpams(model['pams'])
         m.init()
         shaped_data                     = m.prepInput(normdata)
-        val_input, train_input, val_ind = split(shaped_data)
+        val_input, train_input, val_ind, train_ind = split(shaped_data)
         m_autoCNN , m_autoCNNen         = m.get_models()
         val_max = maxdata[val_ind]
+        val_sum = sumdata[val_ind]
+        # train_weights= weights_maxQ[train_ind]
+        # train_weights = weights_occ[train_ind]
+        train_weights = np.multiply(weights_maxQ[train_ind], weights_occ[train_ind])
 
         if options.maxVal>0:
             print('clipping outputs')
             val_input = val_input[:options.maxVal]
             val_max = val_max[:options.maxVal]
+            val_sum = val_sum[:options.maxVal]
 
         if model['ws']=='':
-            if options.quickTrain: train_input = train_input[:5000]
-            history = train(m_autoCNN,m_autoCNNen,train_input,val_input,name=model_name,n_epochs = options.epochs)
+            if options.quickTrain: 
+                train_input = train_input[:5000]
+                train_weights = train_weights[:5000]
+            history = train(m_autoCNN,m_autoCNNen,train_input,train_weights,val_input,name=model_name,n_epochs = options.epochs)
         else:
             save_models(m_autoCNN,model_name)
 
@@ -920,9 +1031,10 @@ def trainCNN(options, args, pam_updates=None):
         input_Q, cnn_deQ, cnn_enQ = m.predict(val_input)
         # re-normalize outputs of AE for comparisons
         print("Restore normalization")
-        ae_out = unnormalize(cnn_deQ.copy(), val_max, rescaleInputToMax=options.rescaleInputToMax)
+        ae_out = unnormalize(cnn_deQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
         ae_out_frac = normalize(cnn_deQ.copy())
-        input_Q_abs = np.array([input_Q[i]*val_max[i] for i in range(0,len(input_Q))])
+        input_Q_abs = np.array([input_Q[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_Q))])
+        # input_Q_abs = np.multiply(input_Q, val_max)
 
         print("Save CSVs")
         ## csv files for RTL verification
@@ -932,24 +1044,27 @@ def trainCNN(options, args, pam_updates=None):
         np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
 
         print("Running non-AE algorithms")
-        if options.EMDonly:
+        if options.AEonly:
             alg_outs = {'ae' : ae_out}
         else:
             thr_lo_Q = np.where(input_Q_abs>1.35,input_Q_abs,0) # 1.35 transverse MIPs
-            stc16_Q = make_supercells(input_Q_abs)
+            stc_Q = make_supercells(input_Q_abs, stc16=(options.nElinks!=5))
+            nBC={2:4, 3:6, 4:9, 5:14} #4, 6, 9, 14 (for 2,3,4,5 e-links)
+            bc_Q = best_choice(input_Q_abs, nBC[options.nElinks]) 
             alg_outs = {
                 'ae' : ae_out,
-                'stc': stc16_Q,
+                'stc': stc_Q,
+                'bc': bc_Q,
                 'thr_lo': thr_lo_Q,
             }
-        if options.EMDonly:
-            alg_outs = {
-                'ae' : ae_out,
-            }
 
-        if options.full:
+        if False and options.full:
             thr_hi_Q = np.where(input_Q_abs>2.0,input_Q_abs,0) # 2.0  transverse MIPs
-            alg_outs['thr_hi']=thr_hi_Q
+            alg_outs['thr_hi']=thr_hi_Q 
+            ae_thr_lo = np.where(ae_out>1.35,ae_out,0) # 1.35  transverse MIPs
+            bc_thr_lo = np.where(bc_Q>1.35,bc_Q,0) # 1.35  transverse MIPs
+            alg_outs['ae_thr_lo']=ae_thr_lo
+            alg_outs['bc_thr_lo']=bc_thr_lo
 
         occupancy_0MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48),axis=1)
         occupancy_1MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48)>1.,axis=1)
@@ -971,12 +1086,16 @@ def trainCNN(options, args, pam_updates=None):
         for algname, alg_out in alg_outs.items():
             print('Calculating metrics for '+algname)
             # charge fraction comparison
-            if False and (not options.skipPlot): plotHist([input_Q.flatten(),alg_out.flatten()],
-                                               algname+"_fracQ",xtitle="charge fraction",ytitle="Cells",
-                                               stats=False,logy=True,leg=['input','output'])
+            if (not options.skipPlot): plotHist([input_Q.flatten(),alg_out.flatten()],
+                                                algname+"_fracQ",xtitle="charge fraction",ytitle="Cells",
+                                                stats=False,logy=True,leg=['input','output'])
             # abs charge comparison
             if(not options.skipPlot): plotHist([input_Q_abs.flatten(),alg_out.flatten()],
                                                algname+"_absQ",xtitle="absolute charge",ytitle="Cells",
+                                               stats=False,logy=True,leg=['input','output'])
+            # abs tower charge comparison (xcheck)
+            if(not options.skipPlot): plotHist([sumTCQ(input_Q_abs),sumTCQ(alg_out)],
+                                               algname+"_absSumTCQ",xtitle="absolute charge",ytitle="48 TC arrays",
                                                stats=False,logy=True,leg=['input','output'])
             # event displays
             if(not options.skipPlot): visDisplays(index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
@@ -991,6 +1110,8 @@ def trainCNN(options, args, pam_updates=None):
                 if(not options.skipPlot) and (not('zero_frac' in mname)):
                     # metric distribution
                     plotHist(vals,"hist_"+name,xtitle=longMetric[mname])
+                    plotHist(vals[vals>-1e-9],"hist_nonzero_"+name,xtitle=longMetric[mname])
+                    plotHist(np.where(vals>-1e-9,1,0),"hist_iszero_"+name,xtitle=longMetric[mname])
                     # 1d profiles
                     plots["occ_"+name] = plotProfile(occupancy_1MT, vals,"profile_occ_"+name,
                                                      nbins=occ_nbins, lims=occ_range,
@@ -998,18 +1119,16 @@ def trainCNN(options, args, pam_updates=None):
                     plots["chg_"+name] = plotProfile(np.log10(val_max), vals,"profile_maxQ_"+name,ytitle=longMetric[mname],
                                                      nbins=chglog_nbins, lims=chglog_range,
                                                      xtitle=logMaxTitle if options.rescaleInputToMax else logTotTitle)
-                    plotHist(vals[val_max<1],"hist_0chg1_"+name,xtitle=longMetric[mname])
-                    plotHist(vals[val_max<2],"hist_0chg2_"+name,xtitle=longMetric[mname])
-                    plotHist(vals[val_max<5],"hist_0chg5_"+name,xtitle=longMetric[mname])
-                    plotHist(vals[val_max<10],"hist_0chg10_"+name,xtitle=longMetric[mname])
-                    plotHist(vals[occupancy_1MT<10],"hist_0occ10_"+name,xtitle=longMetric[mname])
-                    plotHist(vals[occupancy_1MT>10],"hist_10occMAX_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[val_max<1],"hist_0chg1_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[val_max<2],"hist_0chg2_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[val_max<5],"hist_0chg5_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[val_max<10],"hist_0chg10_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[occupancy_1MT<10],"hist_0occ10_"+name,xtitle=longMetric[mname])
+                    # plotHist(vals[occupancy_1MT>10],"hist_10occMAX_"+name,xtitle=longMetric[mname])
                     # plotHist(vals[occupancy_1MT>15],"hist_15occMAX_"+name,xtitle=longMetric[mname])
                     # plotHist(vals[occupancy_1MT>20],"hist_20occMAX_"+name,xtitle=longMetric[mname])
                     # plotHist(vals[occupancy_1MT>30],"hist_30occMAX_"+name,xtitle=longMetric[mname])
                     # plotHist(vals[occupancy_1MT>40],"hist_40occMAX_"+name,xtitle=longMetric[mname])
-                    plotHist(vals[vals>-1e-9],"hist_nonzero_"+name,xtitle=longMetric[mname])
-                    plotHist(np.where(vals>-1e-9,1,0),"hist_iszero_"+name,xtitle=longMetric[mname])
                     # binned profiles 
                     for iocc, occ_lo in enumerate(occ_bins):
                         occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
@@ -1130,13 +1249,14 @@ if __name__== "__main__":
     parser.add_option("--quantize", action='store_true', default = False,dest="quantize", help="Quantize the model with qKeras. Default precision is 16,6 for all values.")
     parser.add_option("--dryRun", action='store_true', default = False,dest="dryRun", help="dryRun")
     parser.add_option("--epochs", type='int', default = 100, dest="epochs", help="n epoch to train")
+    parser.add_option("--nELinks", type='int', default = 5, dest="nElinks", help="n of e-links")
     parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
     parser.add_option("--full", action='store_true', default = False,dest="full", help="run all algorithms and metrics")
-    parser.add_option("--EMDonly", action='store_true', default = False,dest="EMDonly", help="run only EMD metric")
     parser.add_option("--quickTrain", action='store_true', default = False,dest="quickTrain", help="train w only 5k events for testing purposes")
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--maxVal", type='int', default = -1, dest="maxVal", help="n of validation events to consider")
-    #parser.add_option("--rescaleInputToMax", action='store_true', default = False,dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
-    parser.add_option("--rescaleInputToMax", type='int', default=1, dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
+    parser.add_option("--AEonly", type='int', default=1, dest="AEonly", help="run only AE algo")
+    parser.add_option("--rescaleInputToMax", type='int', default=0, dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
+    parser.add_option("--rescaleOutputToMax", type='int', default=0, dest="rescaleOutputToMax", help="recale the output images to match the initial sum")
     (options, args) = parser.parse_args()
     trainCNN(options,args)
