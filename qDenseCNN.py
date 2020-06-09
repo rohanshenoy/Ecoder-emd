@@ -10,6 +10,88 @@ from qkeras import QDense, QConv2D, QActivation
 import numpy as np
 import json
 
+# for sinkhorn metric
+import ot_tf
+import ot
+
+from telescope import telescopeMSE2
+
+hexCoords = np.array([ 
+    [0.0, 0.0], [0.0, -2.4168015], [0.0, -4.833603], [0.0, -7.2504044], 
+    [2.09301, -1.2083969], [2.09301, -3.6251984], [2.09301, -6.042], [2.09301, -8.458794], 
+    [4.18602, -2.4168015], [4.18602, -4.833603], [4.18602, -7.2504044], [4.18602, -9.667198], 
+    [6.27903, -3.6251984], [6.27903, -6.042], [6.27903, -8.458794], [6.27903, -10.875603], 
+    [-8.37204, -10.271393], [-6.27903, -9.063004], [-4.18602, -7.854599], [-2.0930138, -6.6461945], 
+    [-8.37204, -7.854599], [-6.27903, -6.6461945], [-4.18602, -5.4377975], [-2.0930138, -4.229393], 
+    [-8.37204, -5.4377975], [-6.27903, -4.229393], [-4.18602, -3.020996], [-2.0930138, -1.8125992], 
+    [-8.37204, -3.020996], [-6.27903, -1.8125992], [-4.18602, -0.6042023], [-2.0930138, 0.6042023], 
+    [4.7092705, -12.386101], [2.6162605, -11.177696], [0.5232506, -9.969299], [-1.5697594, -8.760895], 
+    [2.6162605, -13.594498], [0.5232506, -12.386101], [-1.5697594, -11.177696], [-3.6627693, -9.969299], 
+    [0.5232506, -14.802895], [-1.5697594, -13.594498], [-3.6627693, -12.386101], [-5.7557793, -11.177696], 
+    [-1.5697594, -16.0113], [-3.6627693, -14.802895], [-5.7557793, -13.594498], [-7.848793, -12.386101]])
+hexMetric = tf.constant( ot.dist(hexCoords, hexCoords, 'euclidean'), tf.float32)
+
+def myfunc(a):
+    reg=0.5
+    y_true, y_pred = tf.split(a,num_or_size_splits=2,axis=1)
+    tf_sinkhorn_loss = ot_tf.sink(y_true, y_pred, hexMetric, (48, 48), reg)
+    return tf_sinkhorn_loss
+def sinkhorn_loss(y_true, y_pred):
+    y_true = K.cast(y_true, y_pred.dtype)
+    y_pred = K.reshape(y_pred, (-1,48,1))
+    y_true = K.reshape(y_true, (-1,48,1))
+    cc = tf.concat([y_true, y_pred], axis=2)
+    return K.mean( tf.map_fn(myfunc, cc), axis=(-1) )
+
+SCmask = np.array([
+    [ 0,  1,  4,  5], #indices for 1 supercell
+    [ 2,  3,  6,  7],
+    [ 8,  9, 12, 13],
+    [10, 11, 14, 15],
+    [16, 17, 20, 21],
+    [18, 19, 22, 23],
+    [24, 25, 28, 29],
+    [26, 27, 30, 31],
+    [32, 33, 36, 37],
+    [34, 35, 38, 39],
+    [40, 41, 44, 45],
+    [43, 43, 46, 47]])
+# 48 x 12 matrix mapping TCs to SC
+Remap_48_12 = np.zeros((48,12))
+for isc,sc in enumerate(SCmask): 
+    for tc in sc: 
+        Remap_48_12[tc,isc]=1
+tf_Remap_48_12 = tf.constant(Remap_48_12,dtype=tf.float32)
+# 12 x 3 mapping
+Remap_12_3 = np.zeros((12,3))
+for i in range(12): Remap_12_3[i,int(i/4)]=1
+tf_Remap_12_3 = tf.constant(Remap_12_3,dtype=tf.float32)
+
+def telescopeMSE(y_true, y_pred):
+    y_true = K.cast(y_true, y_pred.dtype)
+
+    # TC-level MSE
+    y_pred_rs = K.reshape(y_pred, (-1,48))
+    y_true_rs = K.reshape(y_true, (-1,48))
+    # lossTC1 = K.mean(K.square(y_true_rs - y_pred_rs), axis=(-1))
+    lossTC1 = K.mean(K.square(y_true_rs - y_pred_rs) * K.maximum(y_pred_rs, y_true_rs), axis=(-1))
+
+    # map TCs to 2x2 supercells and compute MSE
+    y_pred_12 = tf.matmul(y_pred_rs, tf_Remap_48_12)
+    y_true_12 = tf.matmul(y_true_rs, tf_Remap_48_12)
+    # lossTC2 = K.mean(K.square(y_true_12 - y_pred_12), axis=(-1))
+    lossTC2 = K.mean(K.square(y_true_12 - y_pred_12) * K.maximum(y_pred_12, y_true_12), axis=(-1))
+  
+    # map 2x2 supercells to 4x4 supercells and compute MSE
+    y_pred_3 = tf.matmul(y_pred_12, tf_Remap_12_3)
+    y_true_3 = tf.matmul(y_true_12, tf_Remap_12_3)
+    # lossTC3 = K.mean(K.square(y_true_3 - y_pred_3), axis=(-1))
+    lossTC3 = K.mean(K.square(y_true_3 - y_pred_3) * K.maximum(y_pred_3, y_true_3), axis=(-1))
+
+    # sum MSEs
+    #return lossTC1 + lossTC2 + lossTC3
+    return 4*lossTC1 + 2*lossTC2 + lossTC3
+
 
 class qDenseCNN:
     def __init__(self, name='', weights_f=''):
@@ -29,6 +111,7 @@ class qDenseCNN:
         }
 
         self.weights_f = weights_f
+        # self.extend = False
 
     def setpams(self, in_pams):
         for k, v in in_pams.items():
@@ -135,6 +218,15 @@ class qDenseCNN:
         shape = K.int_shape(x)
         x = QActivation(accum_Qbits, name='accum1_qa')(x)
         x = Flatten(name="flatten")(x)
+        
+        # extended inputs fed forward to the dense layer
+        # if self.extend:
+        #     inputs2 = Input(shape=(2,))  # maxQ, occupancy
+            # input2_Qbits  = self.GetQbits(nBits_input, keep_negative=1) #oddly fails if keep_neg=0
+            # input2_Qbits
+            # x = inputs
+            # x = QActivation(input_Qbits, name='input_qa')(x)
+            
 
         # encoder dense nodes
         for i, n_nodes in enumerate(Dense_layer_nodes):
@@ -198,7 +290,12 @@ class qDenseCNN:
         if self.pams['loss'] == "weightedMSE":
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
-
+        elif self.pams['loss'] == 'telescopeMSE':
+            self.autoencoder.compile(loss=telescopeMSE2, optimizer='adam')
+            self.encoder.compile(loss=telescopeMSE2, optimizer='adam')
+        elif self.pams['loss'] == 'sink':
+            self.autoencoder.compile(loss=sinkhorn_loss, optimizer='adam')
+            self.encoder.compile(loss=sinkhorn_loss, optimizer='adam')
         elif self.pams['loss'] != '':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')

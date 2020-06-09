@@ -3,6 +3,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras import backend as K
 import numpy as np
 import json
+from telescope import telescopeMSE2
 
 class denseCNN:
     def __init__(self,name='',weights_f=''):
@@ -161,6 +162,9 @@ class denseCNN:
         if self.pams['loss']=="weightedMSE":
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
+        elif self.pams['loss'] == 'telescopeMSE':
+            self.autoencoder.compile(loss=telescopeMSE2, optimizer='adam')
+            self.encoder.compile(loss=telescopeMSE2, optimizer='adam')
         elif self.pams['loss']!='':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')

@@ -8,43 +8,38 @@ import matplotlib.pyplot as plt
 import json
 
 from train import trainCNN
-
-def plotHist(x,y,ye, name, odir,xtitle, ytitle):
-    plt.figure()
-    plt.errorbar(x,y,ye)
-    plt.title('')
-    plt.ylabel(ytitle)
-    plt.xlabel(xtitle)
-    plt.legend(['others 16,6'], loc='upper right')
-    plt.savefig(odir+"/"+name+".png")
-    return
+from utils import plotGraphErr
 
 def plotScan(x,outs,name,odir,xtitle="n bits"):
     outs = pd.concat(outs)
     for metric in ['ssd','corr','emd']:
-        plotHist(x, outs[metric], outs[metric+'_err'], name+"_"+metric,
+        plotGraphErr(x, outs[metric], outs[metric+'_err'], name+"_"+metric,
                  odir,xtitle=xtitle,ytitle=metric)
+    outs.to_csv(odir+"/"+name+".csv")
     return
 
 def BitScan(options, args):
 
-    # test inputs
-    bits = [i+3 for i in range(6)]
-    bits = [i+3 for i in range(2)]
-    updates = [{'nBits_input':{'total': b, 'integer': 2}} for b in bits]
-    outputs = [trainCNN(options,args,u) for u in updates]
-    plotScan(bits,outputs,"test_input_bits",options.odir,xtitle="total input bits")
+    if False:
+        # test inputs
+        bits = [i+3 for i in range(6)]
+        updates = [{'nBits_input':{'total': b, 'integer': 2}} for b in bits]
+        outputs = [trainCNN(options,args,u) for u in updates]
+        plotScan(bits,outputs,"test_input_bits",options.odir,xtitle="total input bits")
 
-    exit(0)
+    if False:
+        # test weights
+        bits = [i+1 for i in range(8)]
+        updates = [{'nBits_weight':{'total': 2*b+1, 'integer': b}} for b in bits]
+        outputs = [trainCNN(options,args,u) for u in updates]
+        plotScan(bits,outputs,"test_weight_bits",options.odir,xtitle="total weight bits")
 
-    # test weights
-    bits = [i+1 for i in range(8)]
-    updates = [{'nBits_weight':{'total': 2*b+1, 'integer': b}} for b in bits]
-    outputs = [trainCNN(options,args,u) for u in updates]
-    plotScan(bits,outputs,"test_weight_bits",xtitle="total input bits")
-
-    emd, emde = zip(*[trainCNN(options,args,u) for u in updates])
-    plotScan(bits,emd,emde,"test_weight_bits")
+    if True:
+        # test encoded bits
+        bits = [4,6,8,10,12,16]
+        updates = [{'nBits_encod':{'total': b, 'integer': b/2},'encoded_dim':int(64/b)} for b in bits]
+        outputs = [trainCNN(options,args,u) for u in updates]
+        plotScan(bits,outputs,"test_encod_bits",options.odir,xtitle="bits per encoded node")
 
     exit(0)
 
