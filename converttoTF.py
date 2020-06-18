@@ -30,6 +30,29 @@ def _get_available_gpus():
         tfback._LOCAL_DEVICES = [x.name for x in devices]
     return [x for x in tfback._LOCAL_DEVICES if 'device:gpu' in x.lower()]
 
+def saveTFgraph(tfsession,pred_node_names,tfoutpath,graphname):
+    saver = tfv1.train.Saver()
+    
+    from tensorflow.python.framework import graph_util
+    from tensorflow.python.framework import graph_io
+
+    constant_graph = graph_util.convert_variables_to_constants(
+        tfsession, tfsession.graph.as_graph_def(), pred_node_names)
+
+    f = graphname+'_constantgraph.pb.ascii'
+    tfv1.train.write_graph(constant_graph, tfoutpath, f, as_text=True)
+    print('saved the graph definition in ascii format at: ', os.path.join(tfoutpath, f))
+
+    f = graphname+'_constantgraph.pb'
+    tfv1.train.write_graph(constant_graph, tfoutpath, f, as_text=False)
+    print('saved the graph definition in pb format at: ', os.path.join(tfoutpath, f))
+
+
+    #graph_io.write_graph(constant_graph, args.outputDir, output_graph_name, as_text=False)
+    #print('saved the constant graph (ready for inference) at: ', os.path.join(args.outputDir, output_graph_name))
+
+    saver.save(tfsession, tfoutpath)
+
 tfback._get_available_gpus = _get_available_gpus
 
 ## use tfv1 for conversion
@@ -37,8 +60,6 @@ if tf.__version__.startswith("2."):
     tfv1 = tf.compat.v1
 tfv1.disable_eager_execution()
 
-## get_session is deprecated in tf2
-tfsession = tfv1.keras.backend.get_session()
 
 parser = ArgumentParser('')
 parser.add_argument('-i','--inputModel',dest='inputModel',default='./models/no-weights.json')
@@ -46,8 +67,6 @@ parser.add_argument('-o','--outputDir',dest='outputDir',default='./')
 args = parser.parse_args()
 
 print args.outputDir
-if os.path.isdir(args.outputDir):
-    raise Exception('output directory must not exists yet')
 
 
 f_model = args.inputModel
@@ -57,31 +76,21 @@ with open(f_model,'r') as f:
 hdf5  = f_model.replace('json','hdf5')
 model.load_weights(hdf5)
 
+encoder = model.get_layer("encoder")
+decoder = model.get_layer("decoder")
 print(model.summary())
+print(encoder.summary())
+print(decoder.summary())
 
-num_output = 2
+## get_session is deprecated in tf2
+tfsession = tfv1.keras.backend.get_session()
 
+## From output node of (q)DenseCNN model framework + tfsession.graph.as_graph_def()
+decoder_node_names = ['decoder_output/Sigmoid']
+encoder_node_names = ['encoder/encoded_vector/Relu']
 
+saveTFgraph(tfsession,decoder_node_names,'./testgraphs/','decoder')
+saveTFgraph(tfsession,encoder_node_names,'./testgraphs/','encoder')
+saveTFgraph(tfsession,decoder_node_names+encoder_node_names,'./testgraphs/','fullmodel')
+saveTFgraph(tfsession,encoder_node_names,'./testgraphs/','decoder')
 
-## From output node of (q)DenseCNN model framework
-pred_node_names = ['decoder_output/Sigmoid']
-saver = tfv1.train.Saver()
-
-
-from tensorflow.python.framework import graph_util
-from tensorflow.python.framework import graph_io
-#nonconstant_graph = tfsession.graph.as_graph_def()
-constant_graph = graph_util.convert_variables_to_constants(tfsession, tfsession.graph.as_graph_def(), pred_node_names)
-
-f = 'constantgraph.pb.ascii'
-tfv1.train.write_graph(constant_graph, args.outputDir, f, as_text=True)
-print('saved the graph definition in ascii format at: ', os.path.join(args.outputDir, f))
-
-f = 'constantgraph.pb'
-tfv1.train.write_graph(constant_graph, args.outputDir, f, as_text=False)
-print('saved the graph definition in pb format at: ', os.path.join(args.outputDir, f))
-
-#graph_io.write_graph(constant_graph, args.outputDir, output_graph_name, as_text=False)
-#print('saved the constant graph (ready for inference) at: ', os.path.join(args.outputDir, output_graph_name))
-
-saver.save(tfsession, tfoutpath)
