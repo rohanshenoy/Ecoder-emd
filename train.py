@@ -322,6 +322,10 @@ def d_weighted_rms(a, b):
     a = (1./a.sum() if a.sum() else 1.)*a.flatten()
     b = (1./b.sum() if b.sum() else 1.)*b.flatten()
     return get_rms(hexCoords,a) - get_rms(hexCoords,b)
+def d_abs_weighted_rms(a, b):
+    if (np.sum(a)==0): return -1.
+    if (np.sum(b)==0): return -0.5
+    return np.abs(d_weighted_rms(a, b))
 
 STC4mask = np.array([
     [ 0,  1,  4,  5], #indices for 1 super trigger cell
@@ -509,9 +513,10 @@ def trainCNN(options, args, pam_updates=None):
 
     data_values = data.values
 
-    doubled_data = double_data(data_values.copy())
-    print (doubled_data.shape)
-    data_values = doubled_data
+    if(options.double):
+        doubled_data = double_data(data_values.copy())
+        print ('doubled the data. new shape is',doubled_data.shape)
+        data_values = doubled_data
 
     # plotHist(data.values.flatten(),"TCQ_all",xtitle="Q (all cells)",ytitle="TCs",
     #              stats=False,logy=True,nbins=200,lims=[-0.5,199.5])
@@ -576,6 +581,9 @@ def trainCNN(options, args, pam_updates=None):
     nBits_input  = {'total': 16, 'integer': 6}
     nBits_accum  = {'total': 16, 'integer': 6}
 
+    nBits_input  = {'total': 10, 'integer': 3}
+    nBits_accum  = {'total': 11, 'integer': 3}
+
 
     # Fix # weights in bins (present as scan over output nodes)
     # 4b/10b output: 128*16 * 6b = 12 288
@@ -589,13 +597,13 @@ def trainCNN(options, args, pam_updates=None):
     # 4b/10b output: 128*16 * 6b = 12 288
     
     if(options.nElinks==2):
-        nBits_encod  = {'total':  3, 'integer': 1}
+        nBits_encod  = {'total':  2, 'integer': 1} # 4b (sign not included)
     elif(options.nElinks==5):
-        nBits_encod  = {'total': 9, 'integer': 1}
+        nBits_encod  = {'total': 8, 'integer': 1} # 4b (sign not included)
     else:
         print("must specify encoding bits for nElink =",options.nElinks)
 
-    nBits_weight = {'total':  6, 'integer': 1}
+    nBits_weight = {'total':  5, 'integer': 1} # sign bit not included
     edim = 16
 
 
@@ -605,7 +613,6 @@ def trainCNN(options, args, pam_updates=None):
 
     models = [
         {'name': mymodname, 'ws': '', # custom
-        # {'name': 'no-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may27_nonquant_v7/may8_2elink_16out4b1_6b1weights/may8_2elink_16out4b1_6b1weights.hdf5', # custom
         'pams': {'shape': (4, 4, 3),
                  'channels_first': False,
                  'arrange': arrange443,
@@ -921,6 +928,10 @@ def trainCNN(options, args, pam_updates=None):
                 'nBits_accum':nBits_accum,
                 'nBits_encod': nBits_encod,
             })
+            print('nBits_weight',nBits_weight)
+            print( 'nBits_input', nBits_input)
+            print( 'nBits_accum', nBits_accum)
+            print( 'nBits_encod', nBits_encod)
         if pam_updates:
             m['pams'].update(pam_updates)
             print ('updated parameters for model',m['name'])
@@ -937,7 +948,7 @@ def trainCNN(options, args, pam_updates=None):
     if options.full:
         more_metrics = {
             'dMean':d_weighted_mean,
-            'dRMS':d_weighted_rms,
+            'dRMS':d_abs_weighted_rms,
             #'zero_frac':(lambda x,y: np.all(y==0)),
             # 'cross_corr':cross_corr,
             # 'SSD'      :ssd,
@@ -993,9 +1004,11 @@ def trainCNN(options, args, pam_updates=None):
 
         if options.quantize:
             m = qDenseCNN(weights_f=model['ws'])
+            print ("m is a qDenseCNN")
             #m.extend = True # for extra inputs
         else:
             m = denseCNN(weights_f=model['ws'])
+            print ("m is a denseCNN")
         m.setpams(model['pams'])
         m.init()
         shaped_data                     = m.prepInput(normdata)
@@ -1253,6 +1266,7 @@ if __name__== "__main__":
     parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
     parser.add_option("--full", action='store_true', default = False,dest="full", help="run all algorithms and metrics")
     parser.add_option("--quickTrain", action='store_true', default = False,dest="quickTrain", help="train w only 5k events for testing purposes")
+    parser.add_option("--double", action='store_true', default = False,dest="double", help="test PU400 by combining PU200 events")
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--maxVal", type='int', default = -1, dest="maxVal", help="n of validation events to consider")
     parser.add_option("--AEonly", type='int', default=1, dest="AEonly", help="run only AE algo")
