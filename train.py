@@ -10,6 +10,7 @@ import matplotlib
 matplotlib.use('PDF')
 import matplotlib.pyplot as plt
 import scipy.stats
+from qkeras import get_quantizer
 
 ##from utils import plotHist
 
@@ -488,26 +489,28 @@ def trainCNN(options, args, pam_updates=None):
     # conv_qbits = nBits_weight
     # dense_qbits = nBits_weight
     
-    if (options.nElinks==2 and ("nElinks_2" not in options.inputFile)) \
-       or (options.nElinks==5 and ("nElinks_5" not in options.inputFile)):
+    if (options.nElinks==2 and (("nElinks_2" not in options.inputFile) and ("nElinks_leq2" not in options.inputFile))) \
+       or (options.nElinks==5 and (("nElinks_5" not in options.inputFile) and ("nElinks_gtr2" not in options.inputFile))):
         print ("Are you sure you're using the right input file??")
         print ("nElinks={0} while 'nElinks_{0}' isn't in '{1}'".format(options.nElinks,options.inputFile))
         print ("Otherwise BC, STC settings will be wrong!!")
         print ("Exiting...")
         exit(0)
-  
+
     # from tensorflow.keras import backend
     # backend.set_image_data_format('channels_first')
     if os.path.isdir(options.inputFile):
         df_arr = []
         for infile in os.listdir(options.inputFile):
             infile = os.path.join(options.inputFile,infile)
-            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, usecols=[*range(1, 49)]))
+            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, usecols=[*range(0, 48)])) # new danny data
+            #df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, usecols=[*range(1, 49)])) # old danny data
         data = pd.concat(df_arr)
         data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
         data.describe()
     else:
-        data = pd.read_csv(options.inputFile, dtype=np.float64, usecols=[*range(1, 49)])
+        data = pd.read_csv(options.inputFile, dtype=np.float64, usecols=[*range(0, 48)])
+        #data = pd.read_csv(options.inputFile, dtype=np.float64, usecols=[*range(1, 49)])
         data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
     print('input data shape:',data.shape)
 
@@ -1019,6 +1022,13 @@ def trainCNN(options, args, pam_updates=None):
         # train_weights= weights_maxQ[train_ind]
         # train_weights = weights_occ[train_ind]
         train_weights = np.multiply(weights_maxQ[train_ind], weights_occ[train_ind])
+
+        # for i in [2,5]:
+        #      l = m_autoCNNen.layers[i]
+        #      q = get_quantizer(l.kernel_quantizer)
+        #      w = q(l.kernel)
+        #      print(q.scale)
+        
 
         if options.maxVal>0:
             print('clipping outputs')
