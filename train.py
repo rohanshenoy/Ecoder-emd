@@ -20,6 +20,7 @@ import json
 #from models import *
 from qDenseCNN import qDenseCNN
 from denseCNN import denseCNN
+from dense2DkernelCNN import dense2DkernelCNN
 
 #for earth movers distance calculation
 import ot
@@ -1010,7 +1011,8 @@ def trainCNN(options, args, pam_updates=None):
             print ("m is a qDenseCNN")
             #m.extend = True # for extra inputs
         else:
-            m = denseCNN(weights_f=model['ws'])
+            #m = denseCNN(weights_f=model['ws'])
+            m = dense2DkernelCNN(weights_f=model['ws'])
             print ("m is a denseCNN")
         m.setpams(model['pams'])
         m.init()
