@@ -3,6 +3,7 @@ import tensorflow as tf
 import pandas as pd
 import optparse
 from tensorflow.python.client import device_lib
+from tensorflow.keras import callbacks
 from tensorflow import keras as kr
 from tensorflow.keras import losses
 import os
@@ -22,6 +23,7 @@ from denseCNN import denseCNN
 
 #for earth movers distance calculation
 import ot
+
 
 def double_data(data):
     doubled=[]
@@ -196,18 +198,29 @@ def split(shaped_data, validation_frac=0.2):
 
     return val_input,train_input,val_index,train_index
 
-def train(autoencoder,encoder,train_input, train_weights,val_input,name,n_epochs=100):
+def train(autoencoder,encoder,train_input,train_target,val_input,name,n_epochs=100, train_weights=None):
 
-    es = kr.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=3)
-    history = autoencoder.fit(train_input,train_input,
-                              sample_weight=[train_weights],
-                              epochs=n_epochs,
-                              batch_size=500,
-                              shuffle=True,
-                              validation_data=(val_input,val_input),
-                              callbacks=[es]
-    )
+    es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=3)
+    if train_weights != None:
+        history = autoencoder.fit(train_input,train_target,
+                                  #sample_weight=train_weights,
+                                  epochs=n_epochs,
+                                  batch_size=500,
+                                  shuffle=True,
+                                  validation_data=(val_input,val_input),
+                                  callbacks=[es]
+        )
+    else:
+        history = autoencoder.fit(train_input,train_target,
+                                  epochs=n_epochs,
+                                  batch_size=500,
+                                  shuffle=True,
+                                  validation_data=(val_input,val_input),
+                                  callbacks=[es]
+        )
 
+
+    plt.yscale('log')
     plt.plot(history.history['loss'])
     plt.plot(history.history['val_loss'])
     plt.title('Model loss %s'%name)
@@ -484,8 +497,7 @@ def trainCNN(options, args, pam_updates=None):
     # conv_qbits = nBits_weight
     # dense_qbits = nBits_weight
     
-    if (options.nElinks==2 and ("nElinks_2" not in options.inputFile)) \
-       or (options.nElinks==5 and ("nElinks_5" not in options.inputFile)):
+    if ("nElinks_%s"%options.nElinks not in options.inputFile):
         print ("Are you sure you're using the right input file??")
         print ("nElinks={0} while 'nElinks_{0}' isn't in '{1}'".format(options.nElinks,options.inputFile))
         print ("Otherwise BC, STC settings will be wrong!!")
@@ -498,20 +510,21 @@ def trainCNN(options, args, pam_updates=None):
         df_arr = []
         for infile in os.listdir(options.inputFile):
             infile = os.path.join(options.inputFile,infile)
-            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, usecols=[*range(1, 49)]))
+            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, nrows = options.nrowsPerFile, usecols=[*range(0, 48)]))
         data = pd.concat(df_arr)
         data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
         data.describe()
     else:
-        data = pd.read_csv(options.inputFile, dtype=np.float64, usecols=[*range(1, 49)])
+        data = pd.read_csv(options.inputFile, dtype=np.float64, usecols=[*range(0, 48)])
         data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
     print('input data shape:',data.shape)
 
     data_values = data.values
 
-    doubled_data = double_data(data_values.copy())
-    print (doubled_data.shape)
-    data_values = doubled_data
+    if(options.double):
+        doubled_data = double_data(data_values.copy())
+        print (doubled_data.shape)
+        data_values = doubled_data
 
     # plotHist(data.values.flatten(),"TCQ_all",xtitle="Q (all cells)",ytitle="TCs",
     #              stats=False,logy=True,nbins=200,lims=[-0.5,199.5])
@@ -527,8 +540,9 @@ def trainCNN(options, args, pam_updates=None):
     maxdata = maxdata / 35. # normalize to units of transverse MIPs
     sumdata = sumdata / 35. # normalize to units of transverse MIPs
 
-    weights_occ = getWeights(occupancy_all_1MT,50,0,50)
-    weights_maxQ = getWeights(maxdata,50,0,50)
+    if options.occReweight:
+        weights_occ = getWeights(occupancy_all_1MT,50,0,50)
+        weights_maxQ = getWeights(maxdata,50,0,50)
 
     arrange8x8 = np.array([
         28,29,30,31,0,4,8,12,
@@ -566,15 +580,6 @@ def trainCNN(options, args, pam_updates=None):
                            15,31, 47])
 
 
-    # 2 e-link #s
-    nBits_input  = {'total':  9, 'integer': 2} # actually 8,2 unsigned
-    nBits_accum  = {'total': 10, 'integer': 2}
-    nBits_weight = {'total':  6, 'integer': 1}
-    nBits_encod  = {'total':  4, 'integer': 1}
-
-    # fixes for inputs
-    nBits_input  = {'total': 16, 'integer': 6}
-    nBits_accum  = {'total': 16, 'integer': 6}
 
 
     # Fix # weights in bins (present as scan over output nodes)
@@ -589,329 +594,39 @@ def trainCNN(options, args, pam_updates=None):
     # 4b/10b output: 128*16 * 6b = 12 288
     
     if(options.nElinks==2):
-        nBits_encod  = {'total':  3, 'integer': 1}
+        nBits_encod  = {'total':  3, 'integer': 1} 
+    elif(options.nElinks==3):
+        nBits_encod  = {'total':  5, 'integer': 1}
+    elif(options.nElinks==4):
+        nBits_encod  = {'total':  7, 'integer': 1}
     elif(options.nElinks==5):
-        nBits_encod  = {'total': 9, 'integer': 1}
+        nBits_encod  = {'total':  9, 'integer': 1}
     else:
         print("must specify encoding bits for nElink =",options.nElinks)
 
-    nBits_weight = {'total':  6, 'integer': 1}
+    nBits_input  = {'total': 10, 'integer': 3}
+    nBits_accum  = {'total': 11, 'integer': 3}
+    nBits_weight = {'total':  5, 'integer': 1} # sign bit not included
     edim = 16
 
 
-    mymodname = "may8_2elink_{}out{}b{}_{}b{}weights".format(edim,
-                                                             nBits_encod['total'], nBits_encod['integer'],
-                                                             nBits_weight['total'], nBits_weight['integer'])
+    if options.quantize:
+        mymodname = "Jul24_{}out{}b{}_{}b{}weights".format(edim,
+                                                                 nBits_encod['total'], nBits_encod['integer'],
+                                                                 nBits_weight['total'], nBits_weight['integer'])
+    else:
+        mymodname = "Jul24_keras"
 
     models = [
         {'name': mymodname, 'ws': '', # custom
-        # {'name': 'no-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may27_nonquant_v7/may8_2elink_16out4b1_6b1weights/may8_2elink_16out4b1_6b1weights.hdf5', # custom
         'pams': {'shape': (4, 4, 3),
                  'channels_first': False,
                  'arrange': arrange443,
                  'encoded_dim': edim,
                  'loss': 'telescopeMSE',
              }},
-
-        # {'name': 'no-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e5_16out/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-
-        # {'name': 'chg-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may8_Qwgt_e5_v1/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-
-        # {'name': 'occ-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may8_OccWgt_e5_v1/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i//may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': 'both-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may8_BothWgt_e5_v1/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i/may8_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-
-
-        # {'name': 'no-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_16out/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': 'chg-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/testtmp_may8_Qwgt_v1/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': 'occ-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/testtmp_may8_OccWgt_v1/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': 'both-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/testtmp_may8_bothWgt_v1/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may8_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-
-        # {'name': '16-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_16out/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i/may7v2_2elink_16out4b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod4b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': '10-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_10out/may7v2_2elink_10out6b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod6b1i/may7v2_2elink_10out6b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod6b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': '6-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e2_6out/may7v2_2elink_6out10b1_16b1weights_Input16b6i_Accum16b6i_Weight16b1i_Encod10b1i/may7v2_2elink_6out10b1_16b1weights_Input16b6i_Accum16b6i_Weight16b1i_Encod10b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 6,
-        #          'loss': 'telescopeMSE',
-        #      }},
-
-
-
-
-
-        # {'name': '16-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e5_16out/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 16,
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': '10-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e5_10out/may7v2_2elink_10out15b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod15b1i/may7v2_2elink_10out15b1_10b1weights_Input16b6i_Accum16b6i_Weight10b1i_Encod15b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': '6-outputs', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e5_6out/may7v2_2elink_6out25b1_16b1weights_Input16b6i_Accum16b6i_Weight16b1i_Encod25b1i/may7v2_2elink_6out25b1_16b1weights_Input16b6i_Accum16b6i_Weight16b1i_Encod25b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 6,
-        #          'loss': 'telescopeMSE',
-        #      }},
-
-
-
-
-        # {'name': 'd10-6b2', 'ws': '', #'/home/therwig/data/sandbox/hgcal/Ecoder/apr16_elink2_enc10_6b2/4x4_norm_d10_6b3_Input16b6i_Accum16b6i_Weight16b6i_Encod6b2i/4x4_norm_d10_6b3_Input16b6i_Accum16b6i_Weight16b6i_Encod6b2i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'nBits_encod': {'total': 6, 'integer': 2},
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': 'd12-5b2', 'ws': '', #'/home/therwig/data/sandbox/hgcal/Ecoder/apr16_elink2_enc12_5b2/4x4_norm_d12_5b2_Input16b6i_Accum16b6i_Weight16b6i_Encod5b2i/4x4_norm_d12_5b2_Input16b6i_Accum16b6i_Weight16b6i_Encod5b2i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 12,
-        #          'nBits_encod': {'total': 5, 'integer': 2},
-        #          'loss': 'telescopeMSE',
-        #      }},
-        # {'name': 'd15-4b1', 'ws': '', #'/home/therwig/data/sandbox/hgcal/Ecoder/apr16_elink2_enc15_4b1/4x4_norm_d15_4b1_Input16b6i_Accum16b6i_Weight16b6i_Encod4b1i/4x4_norm_d15_4b1_Input16b6i_Accum16b6i_Weight16b6i_Encod4b1i.hdf5', # custom
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 15,
-        #          'nBits_encod': {'total': 4, 'integer': 1},
-        #          'loss': 'telescopeMSE',
-        #      }},
-
-
-        # {'name': 'tele421wV1', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr6_e2_166_tele421w/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # # {'name': '4x4_norm_d10', 'ws': '',
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'telescopeMSE',
-        # }},
-        # {'name': 'tele421wV2', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr6_e2_166_tele2_421w/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # # {'name': '4x4_norm_d10', 'ws': '',
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'telescopeMSE',
-        # }},
-        # {'name': 'wmse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_wMSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'weightedMSE',
-        # }},
-        # {'name': 'mse', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_MSE/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'mse',
-        # }},
-        # {'name': 'kl', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_KL/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'kullback_leibler_divergence',
-        # }},
-        # {'name': 'tele', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_tele/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'telescopeMSE',
-        # }},
-        # {'name': 'tele421', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/apr2_e2_166_tele421/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i/4x4_norm_d10_Input16b6i_Accum16b6i_Weight16b6i_Encod16b6i.hdf5',
-        # 'pams': {'shape': (4, 4, 3),
-        #          'channels_first': False,
-        #          'arrange': arrange443,
-        #          'encoded_dim': 10,
-        #          'loss': 'telescopeMSE',
-        # }},
-
-        # {'name': '4x4_norm_v7', 'ws': '',
-        #  'pams': {'shape': (4, 4, 3),
-        #           'channels_first': False,
-        #           'arrange': arrange443,
-        #           #'loss': 'weightedMSE',
-        #           'loss': 'sink',
-        #           'CNN_layer_nodes': [4, 4, 4],
-        #           'CNN_kernel_size': [5, 5, 3],
-        #           'CNN_pool': [False, False, False], }},
-
     ]
 
-    #{'name':'denseCNN',  'ws':'denseCNN.hdf5', 'pams':{'shape':(1,8,8) } },
-        #{'name':'denseCNN_2',  'ws':'denseCNN_2.hdf5',
-        #  'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask  } },
-
-    #{'name':'8x8_nomask','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8  }},
-        #{'name':'nfil4','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'CNN_layer_nodes':[4]}},
-        #{'name':'nfils_842','ws':'nfils_842.hdf5','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,
-        #        'CNN_layer_nodes':[8,4,2],
-        #        'CNN_kernel_size':[3,3,3],
-        #        'CNN_pool':[False,False,False],
-        #}} ,
-    #{'name':'nfils_842_pool2','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,
-        #        'CNN_layer_nodes':[8,4,2],
-        #        'CNN_kernel_size':[3,3,3],
-        #        'CNN_pool':[False,True,False],
-        #}} ,
-    #{'name':'8x8_dim10','ws':'','vis_shape':(8,8),'pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':10}},
-        #{'name':'8x8_dim8','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':8}},
-        #{'name':'8x8_dim4','ws':'','pams':{'shape':(8,8,1) ,'arrange': arrange8x8,'arrMask':arrMask,  'encoded_dim':4}},
-        #{'name':'12x4_norm','ws':'','vis_shape':(12,4),'pams':{'shape':(12,4,1),
-        #        'CNN_layer_nodes':[8,4,4,2],
-        #        'CNN_kernel_size':[3,3,3,3],
-        #        'CNN_pool':[False,False,False,False],
-        #}},
-
-    #{'name':'4x4_norm'    ,'ws':'4x4_norm.hdf5'    ,'pams':{'shape':(3,4,4) ,'channels_first':True }},
-        #{'name':'4x4_norm_d10','ws':'4x4_norm_d10.hdf5','pams':{'shape':(3,4,4) ,'channels_first':False ,
-        #                                                       'encoded_dim':10, 'qbits':qBitStr}},
-        #{'name':'4x4_norm_d8' ,'ws':'4x4_norm_d8.hdf5' ,'pams':{'shape':(3,4,4) ,'channels_first':True ,'encoded_dim':8}},
-
-    #{'name':'4x4_v1',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
-        #     'CNN_layer_nodes':[8,8],
-        #     'CNN_kernel_size':[3,3],
-        #     'CNN_pool':[False,False],
-        #}},
-    #{'name':'4x4_v2',  'ws':'','vis_shape':(4,12),'pams':{'shape':(3,4,4) ,'channels_first':True,
-        #     'CNN_layer_nodes':[8,8],
-        #     'CNN_kernel_size':[3,3],
-        #     'CNN_pool':[False,False],
-        #     'Dense_layer_nodes':[16],
-        #}},
-    #{'name':'4x4_v3' ,'ws':'4x4_v3.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,'CNN_kernel_size':[2]}},
-        #{'name':'4x4_norm_v4','ws':'4x4_norm_v4.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True,
-        #     'CNN_layer_nodes':[4,4,4],
-        #     'CNN_kernel_size':[3,3,3],
-        #     'CNN_pool':[False,False,False],
-        #}},
-    #{'name':'4x4_norm_v5','ws':'4x4_norm_v5.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,
-        #     'CNN_layer_nodes':[8,4,2],
-        #     'CNN_kernel_size':[3,3,3],
-        #     'CNN_pool':[False,False,False],
-        #}},
-    #{'name':'4x4_norm_v6','ws':'4x4_norm_v6.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True ,
-        #     'CNN_layer_nodes':[8,4,2],
-        #     'CNN_kernel_size':[5,5,3],
-        #     'CNN_pool':[False,False,False],
-        #}},
-    #{'name':'4x4_norm_v7','ws':'4x4_norm_v7.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True,
-        #     'CNN_layer_nodes':[4,4,4],
-        #     'CNN_kernel_size':[5,5,3],
-        #     'CNN_pool':[False,False,False],
-        #}},
-    #{'name':'4x4_norm_v8','ws':'','pams':{'shape':(4,4,3) ,'channels_first':False,'arrange':arrange443,
-        #     'CNN_layer_nodes':[8,4,4,4,2],
-        #     'CNN_kernel_size':[3,3,3,3,3],
-        #     'CNN_pool':[0,0,0,0,0],
-        #}},
-    #{'name':'4x4_norm_v8_clone10','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True,
-        #     'CNN_layer_nodes':[8,4,4,4,2],
-        #     'CNN_kernel_size':[3,3,3,3,3],
-        #     'CNN_pool':[0,0,0,0,0],
-        #     'n_copy':10,'occ_low':20,'occ_hi':48,
-        #}},
-    #{'name':'4x4_norm_v8_wmse','ws':'4x4_norm_v8_wmse.hdf5','pams':{'shape':(3,4,4) ,'channels_first':True,
-        #     'CNN_layer_nodes':[8,4,4,4,2],
-        #     'CNN_kernel_size':[3,3,3,3,3],
-        #     'CNN_pool':[0,0,0,0,0],
-        #     'loss':'weightedMSE'
-        #}},
-    #{'name':'4x4_norm_v8_KL','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True,
-        #     'CNN_layer_nodes':[8,4,4,4,2],
-        #     'CNN_kernel_size':[3,3,3,3,3],
-        #     'CNN_pool':[0,0,0,0,0],
-        #     'loss':'kullback_leibler_divergence'
-        #}},
-    #{'name':'4x4_norm_v8_skimOcc','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True,
-        #     'CNN_layer_nodes':[8,4,4,4,2],
-        #     'CNN_kernel_size':[3,3,3,3,3],
-        #     'CNN_pool':[0,0,0,0,0],
-        #     'skimOcc':True,'occ_low':20,'occ_hi':48,
-        #}},
-    #{'name':'4x4_norm_v8_hinge','ws':'','pams':{'shape':(3,4,4) ,'channels_first':True,
-        #     'CNN_layer_nodes':[8,4,4,4,2],
-        #     'CNN_kernel_size':[3,3,3,3,3],
-        #     'CNN_pool':[0,0,0,0,0],
-        #     'loss':losses.hinge
-        #}},
 
     for m in models:
         if options.quantize:
@@ -933,6 +648,8 @@ def trainCNN(options, args, pam_updates=None):
     # metrics to compute on the validation dataset
     metrics = {
         'EMD'      :emd,
+        #'dMean':d_weighted_mean,
+        #'dRMS':d_weighted_rms,
     }
     if options.full:
         more_metrics = {
@@ -1003,9 +720,14 @@ def trainCNN(options, args, pam_updates=None):
         m_autoCNN , m_autoCNNen         = m.get_models()
         val_max = maxdata[val_ind]
         val_sum = sumdata[val_ind]
-        # train_weights= weights_maxQ[train_ind]
-        # train_weights = weights_occ[train_ind]
-        train_weights = np.multiply(weights_maxQ[train_ind], weights_occ[train_ind])
+        if options.occReweight:
+           # train_weights= weights_maxQ[train_ind]
+           # train_weights = weights_occ[train_ind]
+           train_weights = np.multiply(weights_maxQ[train_ind], weights_occ[train_ind])
+           #print("tw shape = ",train_weights.shape)
+           #print("train_input shape = ",train_input.shape)
+        else:
+           train_weights = np.ones(len([train_input]))
 
         if options.maxVal>0:
             print('clipping outputs')
@@ -1017,7 +739,18 @@ def trainCNN(options, args, pam_updates=None):
             if options.quickTrain: 
                 train_input = train_input[:5000]
                 train_weights = train_weights[:5000]
-            history = train(m_autoCNN,m_autoCNNen,train_input,train_weights,val_input,name=model_name,n_epochs = options.epochs)
+            if options.occReweight:
+                history = train(m_autoCNN,m_autoCNNen,
+                                train_input,train_input,val_input,
+                                name=model_name,
+                                n_epochs = options.epochs,
+                                train_weights=train_weights)
+            else:
+                history = train(m_autoCNN,m_autoCNNen,
+                                train_input,train_input,val_input,
+                                name=model_name,
+                                n_epochs = options.epochs,
+                                )
         else:
             save_models(m_autoCNN,model_name)
 
@@ -1159,10 +892,14 @@ def trainCNN(options, args, pam_updates=None):
                     # visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
                     if len(hi_index)>0:
                         hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
-                        visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
+                        visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q90")
+                        hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
+                        visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q90_2")
                     if len(lo_index)>0:
                         lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
-                        visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
+                        visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q20")
+                        lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
+                        visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q20_2")
                 
         # overlay different metrics
         for mname in metrics:
@@ -1253,10 +990,13 @@ if __name__== "__main__":
     parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
     parser.add_option("--full", action='store_true', default = False,dest="full", help="run all algorithms and metrics")
     parser.add_option("--quickTrain", action='store_true', default = False,dest="quickTrain", help="train w only 5k events for testing purposes")
+    parser.add_option("--double", action='store_true', default = False,dest="double", help="test PU400 by combining PU200 events")
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--maxVal", type='int', default = -1, dest="maxVal", help="n of validation events to consider")
     parser.add_option("--AEonly", type='int', default=1, dest="AEonly", help="run only AE algo")
     parser.add_option("--rescaleInputToMax", type='int', default=0, dest="rescaleInputToMax", help="recale the input images so the maximum deposit is 1. Else normalize")
     parser.add_option("--rescaleOutputToMax", type='int', default=0, dest="rescaleOutputToMax", help="recale the output images to match the initial sum")
+    parser.add_option("--nrowsPerFile", type='int', default=500000, dest="nrowsPerFile", help="load nrowsPerFile in a directory")
+    parser.add_option("--occReweight", action='store_true', default = False,dest="occReweight", help="Train with per-event weight on TC occupancy")
     (options, args) = parser.parse_args()
     trainCNN(options,args)
