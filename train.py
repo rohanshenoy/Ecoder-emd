@@ -202,7 +202,7 @@ def train(autoencoder,encoder,train_input, train_weights,val_input,name,n_epochs
 
     es = kr.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=3)
     history = autoencoder.fit(train_input,train_input,
-                              sample_weight=[train_weights],
+                              #sample_weight=[train_weights],
                               epochs=n_epochs,
                               batch_size=500,
                               shuffle=True,
@@ -490,8 +490,9 @@ def trainCNN(options, args, pam_updates=None):
     # conv_qbits = nBits_weight
     # dense_qbits = nBits_weight
     
-    if (options.nElinks==2 and (("nElinks_2" not in options.inputFile) and ("nElinks_leq2" not in options.inputFile))) \
-       or (options.nElinks==5 and (("nElinks_5" not in options.inputFile) and ("nElinks_gtr2" not in options.inputFile))):
+    if ((options.nElinks==2 and (("nElinks_2" not in options.inputFile) and ("nElinks_leq2" not in options.inputFile))) \
+       or (options.nElinks==5 and (("nElinks_5" not in options.inputFile) and ("nElinks_gtr2" not in options.inputFile)))) \
+       and not options.overrideInput:
         print ("Are you sure you're using the right input file??")
         print ("nElinks={0} while 'nElinks_{0}' isn't in '{1}'".format(options.nElinks,options.inputFile))
         print ("Otherwise BC, STC settings will be wrong!!")
@@ -614,16 +615,68 @@ def trainCNN(options, args, pam_updates=None):
     mymodname = "may8_2elink_{}out{}b{}_{}b{}weights".format(edim,
                                                              nBits_encod['total'], nBits_encod['integer'],
                                                              nBits_weight['total'], nBits_weight['integer'])
+    prefix='/home/therwig/data/sandbox/hgcal/Ecoder/'
 
     models = [
-        {'name': mymodname, 'ws': '', # custom
-        'pams': {'shape': (4, 4, 3),
-                 'channels_first': False,
-                 'arrange': arrange443,
-                 'encoded_dim': edim,
-                 'loss': 'telescopeMSE',
-             }},
+        # {'name': mymodname, 'ws': '', # custom
+        #  'pams': {'shape': (4, 4, 3),
+        #           'channels_first': False,
+        #           'arrange': arrange443,
+        #           'encoded_dim': edim,
+        #           'loss': 'telescopeMSE',
+        #       },
+        #  'isQK': options.quantize,
+        # },
+        # {'name': 'test', 'ws': prefix+'outputs/ele_test/may8_2elink_16out8b1_5b1weights/may8_2elink_16out8b1_5b1weights.hdf5', # custom
+        #  'pams': {'shape': (4, 4, 3),
+        #           'channels_first': False,
+        #           'arrange': arrange443,
+        #           'encoded_dim': edim,
+        #           'loss': 'telescopeMSE',
+        #       },
+        #  'isQK': options.quantize,
+        # },
+        # {'name': 'qK-5eSig', 'ws': prefix+'outputs/jul9_e5_allocSignal_qK_v0/may8_2elink_16out8b1_5b1weights_Input10b3i_Accum11b3i_Weight5b1i_Encod8b1i/may8_2elink_16out8b1_5b1weights_Input10b3i_Accum11b3i_Weight5b1i_Encod8b1i.hdf5', # custom
+        #  'pams': {'shape': (4, 4, 3),
+        #           'channels_first': False,
+        #           'arrange': arrange443,
+        #           'encoded_dim': edim,
+        #           'loss': 'telescopeMSE',
+        #       },
+        #  'isQK': True,
+        # },
+        # {'name': 'qK-5ePU', 'ws': prefix+'outputs/jul9_e5_allocPU_qK_v0/may8_2elink_16out8b1_5b1weights_Input10b3i_Accum11b3i_Weight5b1i_Encod8b1i/may8_2elink_16out8b1_5b1weights_Input10b3i_Accum11b3i_Weight5b1i_Encod8b1i.hdf5', # custom
+        #  'pams': {'shape': (4, 4, 3),
+        #           'channels_first': False,
+        #           'arrange': arrange443,
+        #           'encoded_dim': edim,
+        #           'loss': 'telescopeMSE',
+        #       },
+        #  'isQK': True,
+        # },
+        # {'name': '5eSig', 'ws': prefix+'outputs/jul9_e5_allocSignal_v0/may8_2elink_16out8b1_5b1weights/may8_2elink_16out8b1_5b1weights.hdf5', # custom
+        #  'pams': {'shape': (4, 4, 3),
+        #           'channels_first': False,
+        #           'arrange': arrange443,
+        #           'encoded_dim': edim,
+        #           'loss': 'telescopeMSE',
+        #       },
+        #  'isQK': False,
+        # },
+        {'name': '5ePU', 'ws': prefix+'outputs/jul9_e5_allocPU_v0/may8_2elink_16out8b1_5b1weights/may8_2elink_16out8b1_5b1weights.hdf5', # custom
+         'pams': {'shape': (4, 4, 3),
+                  'channels_first': False,
+                  'arrange': arrange443,
+                  'encoded_dim': edim,
+                  'loss': 'telescopeMSE',
+              },
+         'isQK': False,
+        },
 
+
+
+
+        
         # {'name': 'no-weight', 'ws': '/home/therwig/data/sandbox/hgcal/Ecoder/may7v2_e5_16out/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i/may7v2_2elink_16out10b1_6b1weights_Input16b6i_Accum16b6i_Weight6b1i_Encod10b1i.hdf5', # custom
         # 'pams': {'shape': (4, 4, 3),
         #          'channels_first': False,
@@ -925,7 +978,8 @@ def trainCNN(options, args, pam_updates=None):
         #}},
 
     for m in models:
-        if options.quantize:
+        if m['isQK']:
+        #if options.quantize:
             m['pams'].update({
                 'nBits_weight':nBits_weight,
                 'nBits_input':nBits_input,
@@ -997,7 +1051,8 @@ def trainCNN(options, args, pam_updates=None):
     perf_dict={}
     for model in models:
         model_name = model['name']
-        if options.quantize:
+        #if options.quantize:
+        if model['isQK']:
             bit_str = GetBitsString(model['pams']['nBits_input'], model['pams']['nBits_accum'],
                                     model['pams']['nBits_weight'], model['pams']['nBits_encod'],
                                     (model['pams']['nBits_dense'] if 'nBits_dense'  in model['pams'] else False),
@@ -1006,18 +1061,26 @@ def trainCNN(options, args, pam_updates=None):
         if not os.path.exists(model_name): os.mkdir(model_name)
         os.chdir(model_name)
 
-        if options.quantize:
+        if model['isQK']:
             m = qDenseCNN(weights_f=model['ws'])
             print ("m is a qDenseCNN")
             #m.extend = True # for extra inputs
         else:
-            #m = denseCNN(weights_f=model['ws'])
-            m = dense2DkernelCNN(weights_f=model['ws'])
+            m = denseCNN(weights_f=model['ws'])
+            #m = dense2DkernelCNN(weights_f=model['ws'])
             print ("m is a denseCNN")
         m.setpams(model['pams'])
         m.init()
         shaped_data                     = m.prepInput(normdata)
-        val_input, train_input, val_ind, train_ind = split(shaped_data)
+        if options.evalOnly:
+            val_input = shaped_data
+            val_ind = np.array(range(len(shaped_data)))
+            train_input = val_input[:0] #empty with correct shape
+            train_ind = val_ind[:0]
+            print('training shape',train_input.shape)
+            print('validation shape',val_input.shape)
+        else:
+            val_input, train_input, val_ind, train_ind = split(shaped_data)
         m_autoCNN , m_autoCNNen         = m.get_models()
         val_max = maxdata[val_ind]
         val_sum = sumdata[val_ind]
@@ -1053,7 +1116,15 @@ def trainCNN(options, args, pam_updates=None):
         }
 
         print("Evaluate AE")
+        # print (val_input.shape)
+        # for i in range(5):
+        #     print (val_input[i].shape)
+        #     print (val_input[i])
         input_Q, cnn_deQ, cnn_enQ = m.predict(val_input)
+        # print (cnn_deQ.shape)
+        # for i in range(5):
+        #     print (cnn_deQ[i].shape)
+        #     print (cnn_deQ[i])
         # re-normalize outputs of AE for comparisons
         print("Restore normalization")
         ae_out = unnormalize(cnn_deQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
@@ -1279,6 +1350,8 @@ if __name__== "__main__":
     parser.add_option("--full", action='store_true', default = False,dest="full", help="run all algorithms and metrics")
     parser.add_option("--quickTrain", action='store_true', default = False,dest="quickTrain", help="train w only 5k events for testing purposes")
     parser.add_option("--double", action='store_true', default = False,dest="double", help="test PU400 by combining PU200 events")
+    parser.add_option("--evalOnly", action='store_true', default = False,dest="evalOnly", help="only evaluate the NN on the input sample, no train")
+    parser.add_option("--overrideInput", action='store_true', default = False,dest="overrideInput", help="disable safety check on inputs")
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--maxVal", type='int', default = -1, dest="maxVal", help="n of validation events to consider")
     parser.add_option("--AEonly", type='int', default=1, dest="AEonly", help="run only AE algo")
