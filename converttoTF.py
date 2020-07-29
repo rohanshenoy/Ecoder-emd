@@ -13,6 +13,7 @@ from argparse import ArgumentParser
 from keras import backend as K
 import os
 import tensorflow as tf
+import json
 import keras.backend.tensorflow_backend as tfback
 
 print("tf.__version__ is", tf.__version__)
@@ -38,6 +39,7 @@ def saveTFgraph(tfsession,pred_node_names,tfoutpath,graphname):
 
     constant_graph = graph_util.convert_variables_to_constants(
         tfsession, tfsession.graph.as_graph_def(), pred_node_names)
+    #constant_graph = tfsession.graph.as_graph_def()
 
     f = graphname+'_constantgraph.pb.ascii'
     tfv1.train.write_graph(constant_graph, tfoutpath, f, as_text=True)
@@ -62,35 +64,49 @@ tfv1.disable_eager_execution()
 
 
 parser = ArgumentParser('')
-parser.add_argument('-i','--inputModel',dest='inputModel',default='./models/no-weights.json')
+parser.add_argument('-i','--inputModel',dest='inputModel',default='./models/no-weight.json')
 parser.add_argument('-o','--outputDir',dest='outputDir',default='./')
+parser.add_argument('--outputLayer',dest='outputLayer',default='encoded_vector/Relu')
+parser.add_argument('--outputGraph',dest='outputGraph',default='encoder')
+
 args = parser.parse_args()
 
-print args.outputDir
+print(args.outputDir)
 
 
 f_model = args.inputModel
 with open(f_model,'r') as f:
-    model = model_from_json(f.read())
+    if 'QActivation' in f.read():
+        from qkeras import QDense, QConv2D, QActivation,quantized_bits,Clip
+        f.seek(0)
+        model = model_from_json(f.read(),
+                                custom_objects={'QActivation':QActivation,
+                                                'quantized_bits':quantized_bits,
+                                                'QConv2D':QConv2D,
+                                                'QDense':QDense,
+                                                'Clip':Clip})
+        hdf5  = f_model.replace('json','hdf5')
+        model.load_weights(hdf5)
+    else:
+        f.seek(0)
+        model = model_from_json(f.read())
+        hdf5  = f_model.replace('json','hdf5')
+        model.load_weights(hdf5)
 
-hdf5  = f_model.replace('json','hdf5')
-model.load_weights(hdf5)
 
-encoder = model.get_layer("encoder")
-decoder = model.get_layer("decoder")
 print(model.summary())
-print(encoder.summary())
-print(decoder.summary())
 
 ## get_session is deprecated in tf2
 tfsession = tfv1.keras.backend.get_session()
 
 ## From output node of (q)DenseCNN model framework + tfsession.graph.as_graph_def()
-decoder_node_names = ['decoder_output/Sigmoid']
-encoder_node_names = ['encoder/encoded_vector/Relu']
+#decoder_node_names = ['decoder_output/Sigmoid']
+#encoder_node_names = ['encoder/encoded_vector/Relu']
 
-saveTFgraph(tfsession,decoder_node_names,'./testgraphs/','decoder')
-saveTFgraph(tfsession,encoder_node_names,'./testgraphs/','encoder')
-saveTFgraph(tfsession,decoder_node_names+encoder_node_names,'./testgraphs/','fullmodel')
-saveTFgraph(tfsession,encoder_node_names,'./testgraphs/','decoder')
+graph_node_names = [args.outputLayer]
 
+saveTFgraph(tfsession,graph_node_names,args.outputDir,args.outputGraph)
+
+#saveTFgraph(tfsession,encoder_node_names,args.outputDir,'encoder')
+#saveTFgraph(tfsession,decoder_node_names,args.outputDir,'decoder')
+#saveTFgraph(tfsession,decoder_node_names+encoder_node_names,args.outputDir,'fullmodel')

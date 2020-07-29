@@ -67,3 +67,15 @@ python train.py -i ~/eos/ecoder/pgun_pid1_pt200_200PU.csv  -o ./qjet_200PU/  --e
 ## After producing a `.hdf5` file from trainning, you can re-run the model skipping the trainning phase.
 ## Do so by simply setting the model parameter 'ws' to `modelname.hdf5`
 ```
+
+## Convert to a constant tensorflow graph
+
+Using tensorflow `2.4.0` and keras `2.2.4-tf`.
+Can be obtained from `CMSSW_11_1_0`.
+```
+### convert the decoder model
+python3 converttoTF.py -o ./graphs/ -i decoder_Jul24_keras.json --outputGraph decoder --outputLayer decoder_output/Sigmoid 
+### convert the encoder model
+python3 converttoTF.py -o ./graphs/ -i encoder_Jul24_keras.json --outputGraph encoder --outputLayer encoded_vector/Relu 
+
+```
