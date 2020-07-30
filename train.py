@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use('PDF')
 import matplotlib.pyplot as plt
 import scipy.stats
+from qkeras import get_quantizer
 
 ##from utils import plotHist
 
@@ -20,6 +21,7 @@ import json
 #from models import *
 from qDenseCNN import qDenseCNN
 from denseCNN import denseCNN
+from dense2DkernelCNN import dense2DkernelCNN
 
 #for earth movers distance calculation
 import ot
@@ -219,7 +221,6 @@ def train(autoencoder,encoder,train_input,train_target,val_input,name,n_epochs=1
                                   callbacks=[es]
         )
 
-
     plt.yscale('log')
     plt.plot(history.history['loss'])
     plt.plot(history.history['val_loss'])
@@ -336,6 +337,10 @@ def d_weighted_rms(a, b):
     a = (1./a.sum() if a.sum() else 1.)*a.flatten()
     b = (1./b.sum() if b.sum() else 1.)*b.flatten()
     return get_rms(hexCoords,a) - get_rms(hexCoords,b)
+def d_abs_weighted_rms(a, b):
+    if (np.sum(a)==0): return -1.
+    if (np.sum(b)==0): return -0.5
+    return np.abs(d_weighted_rms(a, b))
 
 STC4mask = np.array([
     [ 0,  1,  4,  5], #indices for 1 super trigger cell
@@ -482,68 +487,7 @@ def GetBitsString(In, Accum, Weight, Encoded, Dense=False, Conv=False):
 
 def sumTCQ(x): return x.reshape(len(x),48).sum(axis=1)
 
-def trainCNN(options, args, pam_updates=None):
-    # List devices:
-    print(device_lib.list_local_devices())
-    print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
-    print("Is GPU available? ", tf.test.is_gpu_available())
-
-    # default precisions for quantized training
-    nBits_input  = {'total': 16, 'integer': 6}
-    nBits_accum  = {'total': 16, 'integer': 6}
-    nBits_weight = {'total': 16, 'integer': 6}
-    nBits_encod  = {'total': 16, 'integer': 6}
-    # model-dependent -- use common weights unless overridden
-    # conv_qbits = nBits_weight
-    # dense_qbits = nBits_weight
-    
-    if ("nElinks_%s"%options.nElinks not in options.inputFile):
-        print ("Are you sure you're using the right input file??")
-        print ("nElinks={0} while 'nElinks_{0}' isn't in '{1}'".format(options.nElinks,options.inputFile))
-        print ("Otherwise BC, STC settings will be wrong!!")
-        print ("Exiting...")
-        exit(0)
-  
-    # from tensorflow.keras import backend
-    # backend.set_image_data_format('channels_first')
-    if os.path.isdir(options.inputFile):
-        df_arr = []
-        for infile in os.listdir(options.inputFile):
-            infile = os.path.join(options.inputFile,infile)
-            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, nrows = options.nrowsPerFile, usecols=[*range(0, 48)]))
-        data = pd.concat(df_arr)
-        data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
-        data.describe()
-    else:
-        data = pd.read_csv(options.inputFile, dtype=np.float64, usecols=[*range(0, 48)])
-        data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
-    print('input data shape:',data.shape)
-
-    data_values = data.values
-
-    if(options.double):
-        doubled_data = double_data(data_values.copy())
-        print (doubled_data.shape)
-        data_values = doubled_data
-
-    # plotHist(data.values.flatten(),"TCQ_all",xtitle="Q (all cells)",ytitle="TCs",
-    #              stats=False,logy=True,nbins=200,lims=[-0.5,199.5])
-    # from 20 to 200 ADCs, distribution is approx f(x) = -8.05067e+03 + 1.26147e+06/x + 1.48390e+08/x^2
-    # for nelink=2 sample
-    # >>> f2 =  ROOT.TF1( "f2", "[1]/x+[0]+[2]/pow(x,2)",20,199)
-    # >>> h.Fit(f2,"","",20,199)
-
-
-    occupancy_all = np.count_nonzero(data_values,axis=1)
-    occupancy_all_1MT = np.count_nonzero(data_values>35,axis=1)
-    normdata,maxdata,sumdata = normalize(data_values.copy(),rescaleInputToMax=options.rescaleInputToMax)
-    maxdata = maxdata / 35. # normalize to units of transverse MIPs
-    sumdata = sumdata / 35. # normalize to units of transverse MIPs
-
-    if options.occReweight:
-        weights_occ = getWeights(occupancy_all_1MT,50,0,50)
-        weights_maxQ = getWeights(maxdata,50,0,50)
-
+def buildmodels(options,pam_updates):
     arrange8x8 = np.array([
         28,29,30,31,0,4,8,12,
         24,25,26,27,1,5,9,13,
@@ -552,7 +496,7 @@ def trainCNN(options, args, pam_updates=None):
         47,43,39,35,35,34,33,32,
         46,42,38,34,39,38,37,36,
         45,41,37,33,43,42,41,40,
-        44,40,36,32,47,46,45,44])    
+        44,40,36,32,47,46,45,44])
     arrMask  =  np.array([
         1,1,1,1,1,1,1,1,
         1,1,1,1,1,1,1,1,
@@ -578,9 +522,6 @@ def trainCNN(options, args, pam_updates=None):
                            13,29, 45,
                            14,30, 46,
                            15,31, 47])
-
-
-
 
     # Fix # weights in bins (present as scan over output nodes)
     # 4b/10b output: 128*16 * 6b = 12 288
@@ -609,11 +550,8 @@ def trainCNN(options, args, pam_updates=None):
     nBits_weight = {'total':  5, 'integer': 1} # sign bit not included
     edim = 16
 
-
     if options.quantize:
-        mymodname = "Jul24_{}out{}b{}_{}b{}weights".format(edim,
-                                                                 nBits_encod['total'], nBits_encod['integer'],
-                                                                 nBits_weight['total'], nBits_weight['integer'])
+        mymodname = "Jul24_qKeras"
     else:
         mymodname = "Jul24_keras"
 
@@ -624,49 +562,48 @@ def trainCNN(options, args, pam_updates=None):
                  'arrange': arrange443,
                  'encoded_dim': edim,
                  'loss': 'telescopeMSE',
-             }},
+             },
+         'isQK':options.quantize,
+        },
+        
     ]
-
-
     for m in models:
-        if options.quantize:
+        if m['isQK']:
             m['pams'].update({
                 'nBits_weight':nBits_weight,
                 'nBits_input':nBits_input,
                 'nBits_accum':nBits_accum,
                 'nBits_encod': nBits_encod,
             })
+            print('nBits_weight',nBits_weight)
+            print( 'nBits_input', nBits_input)
+            print( 'nBits_accum', nBits_accum)
+            print( 'nBits_encod', nBits_encod)
         if pam_updates:
             m['pams'].update(pam_updates)
             print ('updated parameters for model',m['name'])
         if options.loss:
             m['pams']['loss'] = options.loss
         print(m)
+    return models
 
-    # compression algorithms, autoencoder and more traditional benchmarks
-    algnames = ['ae','stc','thr_lo','thr_hi','bc']
-    # metrics to compute on the validation dataset
-    metrics = {
-        'EMD'      :emd,
-        #'dMean':d_weighted_mean,
-        #'dRMS':d_weighted_rms,
-    }
-    if options.full:
-        more_metrics = {
-            'dMean':d_weighted_mean,
-            'dRMS':d_weighted_rms,
-            #'zero_frac':(lambda x,y: np.all(y==0)),
-            # 'cross_corr':cross_corr,
-            # 'SSD'      :ssd,
-        }
-        metrics.update(more_metrics)
-        
-    longMetric = {'cross_corr':'cross correlation',
-                  'SSD':'sum of squared differences',
-                  'EMD':'earth movers distance',
-                  'dMean':'difference in energy-weighted mean',
-                  'dRMS':'difference in energy-weighted RMS',
-                  'zero_frac':'zero fraction',}
+def compareModels(models,perf_dict,eval_settings,options):
+
+    algnames = eval_settings['algnames']
+    metrics  = eval_settings['metrics']
+    occ_nbins    =eval_settings[  "occ_nbins"  ] 
+    occ_range    =eval_settings[  "occ_range"   ]
+    occ_bins     =eval_settings[  "occ_bins"    ]
+    chg_nbins    =eval_settings[  "chg_nbins"   ]
+    chg_range    =eval_settings[  "chg_range"   ]
+    chglog_nbins =eval_settings[  "chglog_nbins"]
+    chglog_range =eval_settings[  "chglog_range"]
+    chg_bins     =eval_settings[  "chg_bins"    ]
+    occTitle    =eval_settings["occTitle"   ]
+    logMaxTitle =eval_settings["logMaxTitle"]
+    logTotTitle =eval_settings["logTotTitle"]
+
+
     summary_entries=['name','en_pams','tot_pams']
     for algname in algnames:
         for mname in metrics:
@@ -675,275 +612,7 @@ def trainCNN(options, args, pam_updates=None):
             summary_entries.append(mname+"_"+algname+"_err")
     summary = pd.DataFrame(columns=summary_entries)
 
-    # settings for occupancy plots
-    occ_nbins=12
-    occ_range=(0,24)
-    occ_bins = [0,2,5,10,15]
-    chg_nbins=20
-    chg_range=(0,200)
-    chglog_nbins=10
-    chglog_range=(0,2.5)
-    chg_bins = [0,2,5,10,50]
-
-
-    orig_dir = os.getcwd()
-    if not os.path.exists(options.odir): os.mkdir(options.odir)
-    os.chdir(options.odir)
-    # plot occupancy once
-    if(not options.skipPlot): 
-        plotHist(occupancy_all.flatten(),"occ_all",xtitle="occupancy (all cells)",ytitle="evts",
-                 stats=False,logy=True,nbins=50,lims=[0,50])
-        plotHist(occupancy_all_1MT.flatten(),"occ_1MT",xtitle=r"occupancy (1 MIP$_{\mathrm{T}}$ cells)",ytitle="evts",
-                 stats=False,logy=True,nbins=50,lims=[0,50])
-    # keep track of each models performance
-    perf_dict={}
-    for model in models:
-        model_name = model['name']
-        if options.quantize:
-            bit_str = GetBitsString(model['pams']['nBits_input'], model['pams']['nBits_accum'],
-                                    model['pams']['nBits_weight'], model['pams']['nBits_encod'],
-                                    (model['pams']['nBits_dense'] if 'nBits_dense'  in model['pams'] else False),
-                                    (model['pams']['nBits_conv'] if 'nBits_conv' in model['pams'] else False))
-            model_name += "_" + bit_str
-        if not os.path.exists(model_name): os.mkdir(model_name)
-        os.chdir(model_name)
-
-        if options.quantize:
-            m = qDenseCNN(weights_f=model['ws'])
-            #m.extend = True # for extra inputs
-        else:
-            m = denseCNN(weights_f=model['ws'])
-        m.setpams(model['pams'])
-        m.init()
-        shaped_data                     = m.prepInput(normdata)
-        val_input, train_input, val_ind, train_ind = split(shaped_data)
-        m_autoCNN , m_autoCNNen         = m.get_models()
-        val_max = maxdata[val_ind]
-        val_sum = sumdata[val_ind]
-        if options.occReweight:
-           # train_weights= weights_maxQ[train_ind]
-           # train_weights = weights_occ[train_ind]
-           train_weights = np.multiply(weights_maxQ[train_ind], weights_occ[train_ind])
-           #print("tw shape = ",train_weights.shape)
-           #print("train_input shape = ",train_input.shape)
-        else:
-           train_weights = np.ones(len([train_input]))
-
-        if options.maxVal>0:
-            print('clipping outputs')
-            val_input = val_input[:options.maxVal]
-            val_max = val_max[:options.maxVal]
-            val_sum = val_sum[:options.maxVal]
-
-        if model['ws']=='':
-            if options.quickTrain: 
-                train_input = train_input[:5000]
-                train_weights = train_weights[:5000]
-            if options.occReweight:
-                history = train(m_autoCNN,m_autoCNNen,
-                                train_input,train_input,val_input,
-                                name=model_name,
-                                n_epochs = options.epochs,
-                                train_weights=train_weights)
-            else:
-                history = train(m_autoCNN,m_autoCNNen,
-                                train_input,train_input,val_input,
-                                name=model_name,
-                                n_epochs = options.epochs,
-                                )
-        else:
-            save_models(m_autoCNN,model_name)
-
-        summary_dict = {
-            'name':model_name,
-            'en_pams' : m_autoCNNen.count_params(),
-            'tot_pams': m_autoCNN.count_params(),
-        }
-
-        print("Evaluate AE")
-        input_Q, cnn_deQ, cnn_enQ = m.predict(val_input)
-        # re-normalize outputs of AE for comparisons
-        print("Restore normalization")
-        ae_out = unnormalize(cnn_deQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
-        ae_out_frac = normalize(cnn_deQ.copy())
-        input_Q_abs = np.array([input_Q[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_Q))])
-        # input_Q_abs = np.multiply(input_Q, val_max)
-
-        print("Save CSVs")
-        ## csv files for RTL verification
-        N_csv= (options.nCSV if options.nCSV>=0 else input_Q.shape[0]) # about 80k
-        np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
-        np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
-        np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
-
-        print("Running non-AE algorithms")
-        if options.AEonly:
-            alg_outs = {'ae' : ae_out}
-        else:
-            thr_lo_Q = np.where(input_Q_abs>1.35,input_Q_abs,0) # 1.35 transverse MIPs
-            stc_Q = make_supercells(input_Q_abs, stc16=(options.nElinks!=5))
-            nBC={2:4, 3:6, 4:9, 5:14} #4, 6, 9, 14 (for 2,3,4,5 e-links)
-            bc_Q = best_choice(input_Q_abs, nBC[options.nElinks]) 
-            alg_outs = {
-                'ae' : ae_out,
-                'stc': stc_Q,
-                'bc': bc_Q,
-                'thr_lo': thr_lo_Q,
-            }
-
-        if False and options.full:
-            thr_hi_Q = np.where(input_Q_abs>2.0,input_Q_abs,0) # 2.0  transverse MIPs
-            alg_outs['thr_hi']=thr_hi_Q 
-            ae_thr_lo = np.where(ae_out>1.35,ae_out,0) # 1.35  transverse MIPs
-            bc_thr_lo = np.where(bc_Q>1.35,bc_Q,0) # 1.35  transverse MIPs
-            alg_outs['ae_thr_lo']=ae_thr_lo
-            alg_outs['bc_thr_lo']=bc_thr_lo
-
-        occupancy_0MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48),axis=1)
-        occupancy_1MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48)>1.,axis=1)
-        occupancy=occupancy_0MT
-        if(not options.skipPlot): plotHist(occupancy.flatten(),"occ",xtitle="occupancy",ytitle="evts",
-                                               stats=False,logy=True,nbins=50,lims=[0,50])
-
-        # to generate event displays
-        Nevents = 8
-        index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
-
-        # keep track of plot results
-        plots={}
-        occTitle=r"occupancy [1 MIP$_{\mathrm{T}}$ TCs]"        
-        logMaxTitle=r"log10(Max TC charge/MIP$_{\mathrm{T}}$)"
-        logTotTitle=r"log10(Sum of TC charges/MIP$_{\mathrm{T}}$)"
-
-        # compute metrics for each alg
-        for algname, alg_out in alg_outs.items():
-            print('Calculating metrics for '+algname)
-            # charge fraction comparison
-            if (not options.skipPlot): plotHist([input_Q.flatten(),alg_out.flatten()],
-                                                algname+"_fracQ",xtitle="charge fraction",ytitle="Cells",
-                                                stats=False,logy=True,leg=['input','output'])
-            # abs charge comparison
-            if(not options.skipPlot): plotHist([input_Q_abs.flatten(),alg_out.flatten()],
-                                               algname+"_absQ",xtitle="absolute charge",ytitle="Cells",
-                                               stats=False,logy=True,leg=['input','output'])
-            # abs tower charge comparison (xcheck)
-            if(not options.skipPlot): plotHist([sumTCQ(input_Q_abs),sumTCQ(alg_out)],
-                                               algname+"_absSumTCQ",xtitle="absolute charge",ytitle="48 TC arrays",
-                                               stats=False,logy=True,leg=['input','output'])
-            # event displays
-            if(not options.skipPlot): visDisplays(index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
-            for mname, metric in metrics.items():
-                print('  '+mname)
-                name = mname+"_"+algname
-                vals = np.array([metric(input_Q_abs[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
-                model[name]        = np.round(np.mean(vals), 3)
-                model[name+'_err'] = np.round(np.std(vals), 3)
-                summary_dict[name]        = model[name]
-                summary_dict[name+'_err'] = model[name+'_err']
-                if(not options.skipPlot) and (not('zero_frac' in mname)):
-                    # metric distribution
-                    plotHist(vals,"hist_"+name,xtitle=longMetric[mname])
-                    plotHist(vals[vals>-1e-9],"hist_nonzero_"+name,xtitle=longMetric[mname])
-                    plotHist(np.where(vals>-1e-9,1,0),"hist_iszero_"+name,xtitle=longMetric[mname])
-                    # 1d profiles
-                    plots["occ_"+name] = plotProfile(occupancy_1MT, vals,"profile_occ_"+name,
-                                                     nbins=occ_nbins, lims=occ_range,
-                                                     xtitle=occTitle,ytitle=longMetric[mname])
-                    plots["chg_"+name] = plotProfile(np.log10(val_max), vals,"profile_maxQ_"+name,ytitle=longMetric[mname],
-                                                     nbins=chglog_nbins, lims=chglog_range,
-                                                     xtitle=logMaxTitle if options.rescaleInputToMax else logTotTitle)
-                    # plotHist(vals[val_max<1],"hist_0chg1_"+name,xtitle=longMetric[mname])
-                    # plotHist(vals[val_max<2],"hist_0chg2_"+name,xtitle=longMetric[mname])
-                    # plotHist(vals[val_max<5],"hist_0chg5_"+name,xtitle=longMetric[mname])
-                    # plotHist(vals[val_max<10],"hist_0chg10_"+name,xtitle=longMetric[mname])
-                    # plotHist(vals[occupancy_1MT<10],"hist_0occ10_"+name,xtitle=longMetric[mname])
-                    # plotHist(vals[occupancy_1MT>10],"hist_10occMAX_"+name,xtitle=longMetric[mname])
-                    # plotHist(vals[occupancy_1MT>15],"hist_15occMAX_"+name,xtitle=longMetric[mname])
-                    # plotHist(vals[occupancy_1MT>20],"hist_20occMAX_"+name,xtitle=longMetric[mname])
-                    # plotHist(vals[occupancy_1MT>30],"hist_30occMAX_"+name,xtitle=longMetric[mname])
-                    # plotHist(vals[occupancy_1MT>40],"hist_40occMAX_"+name,xtitle=longMetric[mname])
-                    # binned profiles 
-                    for iocc, occ_lo in enumerate(occ_bins):
-                        occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
-                        occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
-                        indices = (occupancy_1MT >= occ_lo) & (occupancy_1MT < occ_hi)
-                        pname = "chg_{}occ{}_{}".format(occ_lo,occ_hi_s,name)
-                        plots[pname] = plotProfile(np.log10(val_max[indices]), vals[indices],"profile_"+pname,
-                                                   xtitle=logMaxTitle,
-                                                   nbins=chglog_nbins, lims=chglog_range,
-                                                   ytitle=longMetric[mname],
-                                                   text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
-                        print('filling1', model_name, pname)
-                    for ichg, chg_lo in enumerate(chg_bins):
-                        chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
-                        chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
-                        indices = (val_max >= chg_lo) & (val_max < chg_hi)
-                        pname = "occ_{}chg{}_{}".format(chg_lo,chg_hi_s,name)
-                        plots[pname] = plotProfile(occupancy_1MT[indices], vals[indices],"profile_"+pname,
-                                                   xtitle=occTitle,
-                                                   ytitle=longMetric[mname],
-                                                   nbins=occ_nbins, lims=occ_range,
-                                                   text="{} <= Max Q < {}".format(chg_lo,chg_hi_s,name))
-                        print('filling2', model_name, pname)
-                        
-                    # displays
-                    hi_index = (np.where(vals>np.quantile(vals,0.9)))[0]
-                    lo_index = (np.where(vals<np.quantile(vals,0.2)))[0]
-                    # visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
-                    if len(hi_index)>0:
-                        hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
-                        visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q90")
-                        hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
-                        visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q90_2")
-                    if len(lo_index)>0:
-                        lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
-                        visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q20")
-                        lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
-                        visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q20_2")
-                
-        # overlay different metrics
-        for mname in metrics:
-            chgs=[]
-            occs=[]
-            for algname in alg_outs:
-                name = mname+"_"+algname
-                chgs += [(algname, plots["chg_"+mname+"_"+algname])]
-                occs += [(algname, plots["occ_"+mname+"_"+algname])]
-            xt = logMaxTitle if options.rescaleInputToMax else logTotTitle
-            OverlayPlots(chgs,"overlay_chg_"+mname,xtitle=xt,ytitle=mname)
-            OverlayPlots(occs,"overlay_occ_"+mname,xtitle=occTitle,ytitle=mname)
-
-            # binned comparisons
-            for iocc, occ_lo in enumerate(occ_bins):
-                occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
-                occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
-                pname = "chg_{}occ{}_{}".format(occ_lo,occ_hi_s,name)
-                pname = "chg_{}occ{}".format(occ_lo,occ_hi_s)
-                chgs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
-                OverlayPlots(chgs,"overlay_chg_{}_{}occ{}".format(mname,occ_lo,occ_hi_s),
-                             xtitle=logMaxTitle,ytitle=mname,
-                             text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
-            for ichg, chg_lo in enumerate(chg_bins):
-                chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
-                chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
-                pname = "occ_{}chg{}".format(chg_lo,chg_hi_s)
-                occs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
-                OverlayPlots(occs,"overlay_occ_{}_{}chg{}".format(mname,chg_lo,chg_hi_s),
-                             xtitle=occTitle, ytitle=mname,
-                             text="{} <= Max Q < {}".format(chg_lo,chg_hi_s,name))
-
-        perf_dict[model_name] = plots
-
-        print('Summary_dict',summary_dict)
-        summary = summary.append(summary_dict, ignore_index=True)
-
-        with open(model_name+"_pams.json",'w') as f:
-            f.write(json.dumps(m.get_pams(),indent=4))
-        
-        os.chdir('../')
-
-    # compare the relative performance of each model
-    if len(models)>1 and (not options.skipPlot):
+    if(not options.skipPlot):
         # overlay different metrics
         for mname in metrics:
             chgs=[]
@@ -972,10 +641,416 @@ def trainCNN(options, args, pam_updates=None):
                 pname = "{}chg{}".format(chg_lo,chg_hi_s)
                 occs=[ (model_name.split('_')[0], perf_dict[model_name]["occ_{}_{}_ae".format(pname,mname)]) for model_name in perf_dict]
                 OverlayPlots(occs,"ae_comp_occ_{}_{}".format(mname,pname),xtitle=occTitle,ytitle=mname)
+    for model in models:
+        print('Summary_dict',model['summary_dict'])
+        summary = summary.append(model['summary_dict'], ignore_index=True)
+    print(summary)
+
+
+def evalModel(model,charges,aux_arrs,eval_settings,options):
+
+    ### input arrays
+    input_Q      = charges['input_Q']
+    input_Q_abs  = charges['input_Q_abs']
+    cnn_deQ      = charges['cnn_deQ']
+    cnn_enQ      = charges['cnn_enQ']
+    val_sum      = charges['val_sum']
+    val_max      = charges['val_max']
+    ae_out = unnormalize(cnn_deQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
+    ae_out_frac = normalize(cnn_deQ.copy())
+    ### axilliary arrays with shapes 
+    occupancy_1MT = aux_arrs['occupancy_1MT']
+
+
+    algnames    =eval_settings[  "algnames"  ] 
+    metrics     =eval_settings[  "metrics"  ] 
+    occ_nbins    =eval_settings[  "occ_nbins"  ] 
+    occ_range    =eval_settings[  "occ_range"   ]
+    occ_bins     =eval_settings[  "occ_bins"    ]
+    chg_nbins    =eval_settings[  "chg_nbins"   ]
+    chg_range    =eval_settings[  "chg_range"   ]
+    chglog_nbins =eval_settings[  "chglog_nbins"]
+    chglog_range =eval_settings[  "chglog_range"]
+    chg_bins     =eval_settings[  "chg_bins"    ]
+    occTitle    =eval_settings["occTitle"   ]
+    logMaxTitle =eval_settings["logMaxTitle"]
+    logTotTitle =eval_settings["logTotTitle"]
+
+
+    longMetric = {'cross_corr':'cross correlation',
+                  'SSD':'sum of squared differences',
+                  'EMD':'earth movers distance',
+                  'dMean':'difference in energy-weighted mean',
+                  'dRMS':'difference in energy-weighted RMS',
+                  'zero_frac':'zero fraction',}
+
+    print("Running non-AE algorithms")
+    if options.AEonly:
+        alg_outs = {'ae' : ae_out}
+    else:
+        thr_lo_Q = np.where(input_Q_abs>1.35,input_Q_abs,0) # 1.35 transverse MIPs
+        stc_Q = make_supercells(input_Q_abs, stc16=(options.nElinks!=5))
+        nBC={2:4, 3:6, 4:9, 5:14} #4, 6, 9, 14 (for 2,3,4,5 e-links)
+        bc_Q = best_choice(input_Q_abs, nBC[options.nElinks]) 
+        alg_outs = {
+            'ae' : ae_out,
+            'stc': stc_Q,
+            'bc': bc_Q,
+            'thr_lo': thr_lo_Q,
+        }
+
+    if False and options.full:
+        thr_hi_Q = np.where(input_Q_abs>2.0,input_Q_abs,0) # 2.0  transverse MIPs
+        alg_outs['thr_hi']=thr_hi_Q 
+        ae_thr_lo = np.where(ae_out>1.35,ae_out,0) # 1.35  transverse MIPs
+        bc_thr_lo = np.where(bc_Q>1.35,bc_Q,0) # 1.35  transverse MIPs
+        alg_outs['ae_thr_lo']=ae_thr_lo
+        alg_outs['bc_thr_lo']=bc_thr_lo
+
+    # to generate event displays
+    Nevents = 8
+    index = np.random.choice(input_Q.shape[0], Nevents, replace=False)
+
+    model_name = model['name']
+    plots={}
+    summary_dict = {
+        'name':model_name,
+        'en_pams' : model['m_autoCNNen'].count_params(),
+        'tot_pams': model['m_autoCNN'].count_params(),
+    }
+
+    # compute metrics for each alg
+    for algname, alg_out in alg_outs.items():
+        print('Calculating metrics for '+algname)
+        # charge fraction comparison
+        if (not options.skipPlot): plotHist([input_Q.flatten(),alg_out.flatten()],
+                                            algname+"_fracQ",xtitle="charge fraction",ytitle="Cells",
+                                            stats=False,logy=True,leg=['input','output'])
+        # abs charge comparison
+        if(not options.skipPlot): plotHist([input_Q_abs.flatten(),alg_out.flatten()],
+                                           algname+"_absQ",xtitle="absolute charge",ytitle="Cells",
+                                           stats=False,logy=True,leg=['input','output'])
+        # abs tower charge comparison (xcheck)
+        if(not options.skipPlot): plotHist([sumTCQ(input_Q_abs),sumTCQ(alg_out)],
+                                           algname+"_absSumTCQ",xtitle="absolute charge",ytitle="48 TC arrays",
+                                           stats=False,logy=True,leg=['input','output'])
+        # event displays
+        if(not options.skipPlot): visDisplays(index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
+        for mname, metric in metrics.items():
+            print('  '+mname)
+            name = mname+"_"+algname
+            vals = np.array([metric(input_Q_abs[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
+            model[name]        = np.round(np.mean(vals), 3)
+            model[name+'_err'] = np.round(np.std(vals), 3)
+            summary_dict[name]        = model[name]
+            summary_dict[name+'_err'] = model[name+'_err']
+            if(not options.skipPlot) and (not('zero_frac' in mname)):
+                # metric distribution
+                plotHist(vals,"hist_"+name,xtitle=longMetric[mname])
+                plotHist(vals[vals>-1e-9],"hist_nonzero_"+name,xtitle=longMetric[mname])
+                plotHist(np.where(vals>-1e-9,1,0),"hist_iszero_"+name,xtitle=longMetric[mname])
+                # 1d profiles
+                plots["occ_"+name] = plotProfile(occupancy_1MT, vals,"profile_occ_"+name,
+                                                 nbins=occ_nbins, lims=occ_range,
+                                                 xtitle=occTitle,ytitle=longMetric[mname])
+                plots["chg_"+name] = plotProfile(np.log10(val_max), vals,"profile_maxQ_"+name,ytitle=longMetric[mname],
+                                                 nbins=chglog_nbins, lims=chglog_range,
+                                                 xtitle=logMaxTitle if options.rescaleInputToMax else logTotTitle)
+                # plotHist(vals[val_max<1],"hist_0chg1_"+name,xtitle=longMetric[mname])
+                # plotHist(vals[val_max<2],"hist_0chg2_"+name,xtitle=longMetric[mname])
+                # plotHist(vals[val_max<5],"hist_0chg5_"+name,xtitle=longMetric[mname])
+                # plotHist(vals[val_max<10],"hist_0chg10_"+name,xtitle=longMetric[mname])
+                # plotHist(vals[occupancy_1MT<10],"hist_0occ10_"+name,xtitle=longMetric[mname])
+                # plotHist(vals[occupancy_1MT>10],"hist_10occMAX_"+name,xtitle=longMetric[mname])
+                # plotHist(vals[occupancy_1MT>15],"hist_15occMAX_"+name,xtitle=longMetric[mname])
+                # plotHist(vals[occupancy_1MT>20],"hist_20occMAX_"+name,xtitle=longMetric[mname])
+                # plotHist(vals[occupancy_1MT>30],"hist_30occMAX_"+name,xtitle=longMetric[mname])
+                # plotHist(vals[occupancy_1MT>40],"hist_40occMAX_"+name,xtitle=longMetric[mname])
+                # binned profiles 
+                for iocc, occ_lo in enumerate(occ_bins):
+                    occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
+                    occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
+                    indices = (occupancy_1MT >= occ_lo) & (occupancy_1MT < occ_hi)
+                    pname = "chg_{}occ{}_{}".format(occ_lo,occ_hi_s,name)
+                    plots[pname] = plotProfile(np.log10(val_max[indices]), vals[indices],"profile_"+pname,
+                                               xtitle=logMaxTitle,
+                                               nbins=chglog_nbins, lims=chglog_range,
+                                               ytitle=longMetric[mname],
+                                               text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
+                    print('filling1', model_name, pname)
+                for ichg, chg_lo in enumerate(chg_bins):
+                    chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
+                    chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
+                    indices = (val_max >= chg_lo) & (val_max < chg_hi)
+                    pname = "occ_{}chg{}_{}".format(chg_lo,chg_hi_s,name)
+                    plots[pname] = plotProfile(occupancy_1MT[indices], vals[indices],"profile_"+pname,
+                                               xtitle=occTitle,
+                                               ytitle=longMetric[mname],
+                                               nbins=occ_nbins, lims=occ_range,
+                                               text="{} <= Max Q < {}".format(chg_lo,chg_hi_s,name))
+                    print('filling2', model_name, pname)
+                    
+                # displays
+                hi_index = (np.where(vals>np.quantile(vals,0.9)))[0]
+                lo_index = (np.where(vals<np.quantile(vals,0.2)))[0]
+                # visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
+                if len(hi_index)>0:
+                    hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
+                    visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q90")
+                    hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
+                    visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q90_2")
+                if len(lo_index)>0:
+                    lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
+                    visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q20")
+                    lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
+                    visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q20_2")
+            
+    # overlay different metrics
+    for mname in metrics:
+        chgs=[]
+        occs=[]
+        for algname in alg_outs:
+            name = mname+"_"+algname
+            chgs += [(algname, plots["chg_"+mname+"_"+algname])]
+            occs += [(algname, plots["occ_"+mname+"_"+algname])]
+        xt = logMaxTitle if options.rescaleInputToMax else logTotTitle
+        OverlayPlots(chgs,"overlay_chg_"+mname,xtitle=xt,ytitle=mname)
+        OverlayPlots(occs,"overlay_occ_"+mname,xtitle=occTitle,ytitle=mname)
+
+        # binned comparisons
+        for iocc, occ_lo in enumerate(occ_bins):
+            occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
+            occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
+            pname = "chg_{}occ{}_{}".format(occ_lo,occ_hi_s,name)
+            pname = "chg_{}occ{}".format(occ_lo,occ_hi_s)
+            chgs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
+            OverlayPlots(chgs,"overlay_chg_{}_{}occ{}".format(mname,occ_lo,occ_hi_s),
+                         xtitle=logMaxTitle,ytitle=mname,
+                         text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
+        for ichg, chg_lo in enumerate(chg_bins):
+            chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
+            chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
+            pname = "occ_{}chg{}".format(chg_lo,chg_hi_s)
+            occs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
+            OverlayPlots(occs,"overlay_occ_{}_{}chg{}".format(mname,chg_lo,chg_hi_s),
+                         xtitle=occTitle, ytitle=mname,
+                         text="{} <= Max Q < {}".format(chg_lo,chg_hi_s,name))
+
+    return plots,summary_dict
+
+
+
+def trainCNN(options, args, pam_updates=None):
+    # List devices:
+    print(device_lib.list_local_devices())
+    print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
+    print("Is GPU available? ", tf.test.is_gpu_available())
+
+       
+    if ("nElinks_%s"%options.nElinks not in options.inputFile):
+       if not options.overrideInput:
+         print ("Are you sure you're using the right input file??")
+         print ("nElinks={0} while 'nElinks_{0}' isn't in '{1}'".format(options.nElinks,options.inputFile))
+         print ("Otherwise BC, STC settings will be wrong!!")
+         print ("Exiting...")
+         exit(0)
+
+    # from tensorflow.keras import backend
+    # backend.set_image_data_format('channels_first')
+    if os.path.isdir(options.inputFile):
+        df_arr = []
+        for infile in os.listdir(options.inputFile):
+            infile = os.path.join(options.inputFile,infile)
+            df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, nrows = options.nrowsPerFile, usecols=[*range(0, 48)]))
+        data = pd.concat(df_arr)
+        data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
+        data.describe()
+    else:
+        data = pd.read_csv(options.inputFile, dtype=np.float64, usecols=[*range(0, 48)])
+        data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
+    print('input data shape:',data.shape)
+
+    data_values = data.values
+
+    if(options.double):
+        doubled_data = double_data(data_values.copy())
+        print ('doubled the data. new shape is',doubled_data.shape)
+        data_values = doubled_data
+
+    # plotHist(data.values.flatten(),"TCQ_all",xtitle="Q (all cells)",ytitle="TCs",
+    #              stats=False,logy=True,nbins=200,lims=[-0.5,199.5])
+    # from 20 to 200 ADCs, distribution is approx f(x) = -8.05067e+03 + 1.26147e+06/x + 1.48390e+08/x^2
+    # for nelink=2 sample
+    # >>> f2 =  ROOT.TF1( "f2", "[1]/x+[0]+[2]/pow(x,2)",20,199)
+    # >>> h.Fit(f2,"","",20,199)
+
+
+    occupancy_all = np.count_nonzero(data_values,axis=1)
+    occupancy_all_1MT = np.count_nonzero(data_values>35,axis=1)
+    normdata,maxdata,sumdata = normalize(data_values.copy(),rescaleInputToMax=options.rescaleInputToMax)
+    maxdata = maxdata / 35. # normalize to units of transverse MIPs
+    sumdata = sumdata / 35. # normalize to units of transverse MIPs
+
+    if options.occReweight:
+        weights_occ = getWeights(occupancy_all_1MT,50,0,50)
+        weights_maxQ = getWeights(maxdata,50,0,50)
+
+    models = buildmodels(options,pam_updates)
+
+    eval_settings={
+        # compression algorithms, autoencoder and more traditional benchmarks
+        'algnames' : ['ae','stc','thr_lo','thr_hi','bc'],
+        # metrics to compute on the validation dataset
+        'metrics' : {
+            'EMD'      :emd,
+        },
+        "occ_nbins"   :12,
+        "occ_range"   :(0,24),
+        "occ_bins"    : [0,2,5,10,15],
+        "chg_nbins"   :20,
+        "chg_range"   :(0,200),
+        "chglog_nbins":10,
+        "chglog_range":(0,2.5),
+        "chg_bins"    :[0,2,5,10,50],
+        "occTitle"    :r"occupancy [1 MIP$_{\mathrm{T}}$ TCs]"       , 
+        "logMaxTitle" :r"log10(Max TC charge/MIP$_{\mathrm{T}}$)",
+        "logTotTitle" :r"log10(Sum of TC charges/MIP$_{\mathrm{T}}$)",
+    }
+    if options.full:
+        more_metrics = {
+            'dMean':d_weighted_mean,
+            'dRMS':d_abs_weighted_rms,
+            #'zero_frac':(lambda x,y: np.all(y==0)),
+            # 'cross_corr':cross_corr,
+            # 'SSD'      :ssd,
+        }
+        eval_settings['metrics'].update(more_metrics)
+
+    orig_dir = os.getcwd()
+    if not os.path.exists(options.odir): os.mkdir(options.odir)
+    os.chdir(options.odir)
+    # plot occupancy once
+    if(not options.skipPlot): 
+        plotHist(occupancy_all.flatten(),"occ_all",xtitle="occupancy (all cells)",ytitle="evts",
+                 stats=False,logy=True,nbins=50,lims=[0,50])
+        plotHist(occupancy_all_1MT.flatten(),"occ_1MT",xtitle=r"occupancy (1 MIP$_{\mathrm{T}}$ cells)",ytitle="evts",
+                 stats=False,logy=True,nbins=50,lims=[0,50])
+    # keep track of each models performance
+    perf_dict={}
+    for model in models:
+        model_name = model['name']
+        if model['isQK']:
+            bit_str = GetBitsString(model['pams']['nBits_input'], model['pams']['nBits_accum'],
+                                    model['pams']['nBits_weight'], model['pams']['nBits_encod'],
+                                    (model['pams']['nBits_dense'] if 'nBits_dense'  in model['pams'] else False),
+                                    (model['pams']['nBits_conv'] if 'nBits_conv' in model['pams'] else False))
+            model_name += "_" + bit_str
+        if not os.path.exists(model_name): os.mkdir(model_name)
+        os.chdir(model_name)
+
+        if model['isQK']:
+            m = qDenseCNN(weights_f=model['ws'])
+            print ("m is a qDenseCNN")
+            #m.extend = True # for extra inputs
+        else:
+            m = denseCNN(weights_f=model['ws'])
+            #m = dense2DkernelCNN(weights_f=model['ws'])
+            print ("m is a denseCNN")
+        m.setpams(model['pams'])
+        m.init()
+        shaped_data                     = m.prepInput(normdata)
+        if options.evalOnly:
+            val_input = shaped_data
+            val_ind = np.array(range(len(shaped_data)))
+            train_input = val_input[:0] #empty with correct shape
+            train_ind = val_ind[:0]
+            print('training shape',train_input.shape)
+            print('validation shape',val_input.shape)
+        else:
+            val_input, train_input, val_ind, train_ind = split(shaped_data)
+        m_autoCNN , m_autoCNNen         = m.get_models()
+        model['m_autoCNN'] = m_autoCNN
+        model['m_autoCNNen'] = m_autoCNNen
+
+        val_max = maxdata[val_ind]
+        val_sum = sumdata[val_ind]
+        if options.occReweight:
+           train_weights = np.multiply(weights_maxQ[train_ind], weights_occ[train_ind])
+        else:
+           train_weights = np.ones(len([train_input]))
+
+        if options.maxVal>0:
+            print('clipping outputs')
+            val_input = val_input[:options.maxVal]
+            val_max = val_max[:options.maxVal]
+            val_sum = val_sum[:options.maxVal]
+
+        if model['ws']=='':
+            if options.quickTrain: 
+                train_input = train_input[:5000]
+                train_weights = train_weights[:5000]
+            if options.occReweight:
+                history = train(m_autoCNN,m_autoCNNen,
+                                train_input,train_input,val_input,
+                                name=model_name,
+                                n_epochs = options.epochs,
+                                train_weights=train_weights)
+            else:
+                history = train(m_autoCNN,m_autoCNNen,
+                                train_input,train_input,val_input,
+                                name=model_name,
+                                n_epochs = options.epochs,
+                                )
+        else:
+            save_models(m_autoCNN,model_name)
+
+
+        print("Evaluate AE")
+        input_Q, cnn_deQ, cnn_enQ = m.predict(val_input)
+        print("Save CSVs")
+        ## csv files for RTL verification
+        N_csv= (options.nCSV if options.nCSV>=0 else input_Q.shape[0]) # about 80k
+        np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
+        np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
+        np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
+
+        # re-normalize outputs of AE for comparisons
+        print("Restore normalization")
+        input_Q_abs = np.array([input_Q[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_Q))])
+        # input_Q_abs = np.multiply(input_Q, val_max)
+
+        occupancy_0MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48),axis=1)
+        occupancy_1MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48)>1.,axis=1)
+
+        charges = {
+            'input_Q'    : input_Q, 
+            'input_Q_abs': input_Q_abs, 
+            'cnn_deQ'    : cnn_deQ,
+            'cnn_enQ'    : cnn_enQ,
+            'val_sum'    : val_sum,
+            'val_max'    : val_max,
+        }
+        aux_arrs = {
+           'occupancy_1MT':occupancy_1MT 
+        } 
+        
+        perf_dict[model_name] , model['summary_dict'] = evalModel(model,charges,aux_arrs,eval_settings,options)
+
+        occupancy=occupancy_0MT
+        if(not options.skipPlot): plotHist(occupancy.flatten(),"occ",xtitle="occupancy",ytitle="evts",
+                                               stats=False,logy=True,nbins=50,lims=[0,50])
+
+        # keep track of plot results
+        with open(model_name+"_pams.json",'w') as f:
+            f.write(json.dumps(m.get_pams(),indent=4))
+        
+        os.chdir('../')
+
+    # compare the relative performance of each model
+    compareModels(models,perf_dict,eval_settings,options)
 
     os.chdir(orig_dir)
-    print(summary)
-    return summary    
+    return     
 
 if __name__== "__main__":
 
@@ -991,6 +1066,8 @@ if __name__== "__main__":
     parser.add_option("--full", action='store_true', default = False,dest="full", help="run all algorithms and metrics")
     parser.add_option("--quickTrain", action='store_true', default = False,dest="quickTrain", help="train w only 5k events for testing purposes")
     parser.add_option("--double", action='store_true', default = False,dest="double", help="test PU400 by combining PU200 events")
+    parser.add_option("--evalOnly", action='store_true', default = False,dest="evalOnly", help="only evaluate the NN on the input sample, no train")
+    parser.add_option("--overrideInput", action='store_true', default = False,dest="overrideInput", help="disable safety check on inputs")
     parser.add_option("--nCSV", type='int', default = 50, dest="nCSV", help="n of validation events to write to csv")
     parser.add_option("--maxVal", type='int', default = -1, dest="maxVal", help="n of validation events to consider")
     parser.add_option("--AEonly", type='int', default=1, dest="AEonly", help="run only AE algo")

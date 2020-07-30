@@ -170,7 +170,7 @@ class qDenseCNN:
         
     def GetQbits(self, inp, keep_negative=1):
         print("Setting bits {} {} with keep negative = {}".format(inp['total'], inp['integer'], keep_negative))
-        return qkr.quantized_bits(bits=inp['total'], integer=inp['integer'], keep_negative=keep_negative)
+        return qkr.quantized_bits(bits=inp['total'], integer=inp['integer'], keep_negative=keep_negative, alpha=1)
         
     def init(self, printSummary=True): # keep_negitive = 0 on inputs, otherwise for weights keep default (=1)
         encoded_dim = self.pams['encoded_dim']
