@@ -11,12 +11,14 @@ import matplotlib
 matplotlib.use('PDF')
 import matplotlib.pyplot as plt
 import scipy.stats
-from qkeras import get_quantizer
+from qkeras import get_quantizer,QActivation
+from qkeras.utils import model_save_quantized_weights
 
 ##from utils import plotHist
 
 import numba
 import json
+import pickle
 
 #from models import *
 from qDenseCNN import qDenseCNN
@@ -25,6 +27,7 @@ from dense2DkernelCNN import dense2DkernelCNN
 
 #for earth movers distance calculation
 import ot
+import graphUtil
 
 
 def double_data(data):
@@ -231,26 +234,38 @@ def train(autoencoder,encoder,train_input,train_target,val_input,name,n_epochs=1
     plt.savefig("history_%s.pdf"%name)
     plt.close()
 
-    save_models(autoencoder,name)
+
+    isQK = False
+    for layer in autoencoder.layers[1].layers:
+        if QActivation == type(layer): isQK = True
+    save_models(autoencoder,name,isQK)
 
     return history
 
-def save_models(autoencoder, name):
+def save_models(autoencoder, name, isQK=False):
     json_string = autoencoder.to_json()
-    with open('./%s.json'%name,'w') as f:
-        f.write(json_string)
-        encoder = autoencoder.get_layer("encoder")
-        json_string = encoder.to_json()
-        with open('./%s.json'%("encoder_"+name),'w') as f:
-            f.write(json_string)
-            decoder = autoencoder.get_layer("decoder")
-            json_string = decoder.to_json()
-            with open('./%s.json'%("decoder_"+name),'w') as f:
-                f.write(json_string)
-                autoencoder.save_weights('%s.hdf5'%name)
-                encoder.save_weights('%s.hdf5'%("encoder_"+name))
-                decoder.save_weights('%s.hdf5'%("decoder_"+name))
-                return
+    encoder = autoencoder.get_layer("encoder")
+    decoder = autoencoder.get_layer("decoder")
+    with open('./%s.json'%name,'w') as f:        f.write(autoencoder.to_json())
+    with open('./%s.json'%("encoder_"+name),'w') as f:            f.write(encoder.to_json())
+    with open('./%s.json'%("decoder_"+name),'w') as f:            f.write(decoder.to_json())
+    autoencoder.save_weights('%s.hdf5'%name)
+    encoder.save_weights('%s.hdf5'%("encoder_"+name))
+    decoder.save_weights('%s.hdf5'%("decoder_"+name))
+    if isQK:
+       encoder_qWeight = model_save_quantized_weights(encoder) 
+       with open('encoder_'+name+'.pkl','wb') as f:       pickle.dump(encoder_qWeight,f)
+       encoder = graphUtil.setQuanitzedWeights(encoder,'encoder_'+name+'.pkl')
+       print('unique weights',len(np.unique(encoder.layers[5].get_weights()[0])))
+    graphUtil.outputFrozenGraph(encoder,'encoder_'+name+'.pb')
+    graphUtil.outputFrozenGraph(encoder,'encoder_'+name+'.pb.ascii','./',True)
+    graphUtil.outputFrozenGraph(decoder,'decoder_'+name+'.pb')
+    graphUtil.outputFrozenGraph(decoder,'decoder_'+name+'.pb.ascii','./',True)
+    graphUtil.plotWeights(autoencoder)
+    graphUtil.plotWeights(encoder)
+    graphUtil.plotWeights(decoder)
+
+    return
 
 ### cross correlation of input/output 
 def cross_corr(x,y):
@@ -397,14 +412,20 @@ def best_choice(inQ, n):
 #     x = np.where(x>=cut,x,0)
 #     return x
 
-def visDisplays(index,input_Q,decoded_Q,encoded_Q=np.array([]),name='model_X'):
+def visDisplays(index,input_Q,decoded_Q,encoded_Q=np.array([]),conv2d=None,name='model_X'):
     Nevents = len(index)
         
     inputImg    = input_Q[index]
     outputImg   = decoded_Q[index]
 
-    nrows = 3 if len(encoded_Q) else 2
-    fig, axs = plt.subplots(nrows, Nevents, figsize=(16, 10))
+    if conv2d is not None:
+        actImg      = conv2d.predict(inputImg.reshape(Nevents,4,4,3))
+        nFilters    = actImg.shape[-1]
+        nrows = 3+nFilters 
+        fig, axs = plt.subplots(nrows, Nevents, figsize=(16, 20))
+    else:
+        nrows = 3 if len(encoded_Q) else 2
+        fig, axs = plt.subplots(nrows, Nevents, figsize=(16, 10))
     
     for i in range(0,Nevents):
         if i==0:
@@ -429,6 +450,14 @@ def visDisplays(index,input_Q,decoded_Q,encoded_Q=np.array([]),name='model_X'):
                 axs[2,i].set(xlabel='latent dim',title='Encoded_%i'%i)
                 c1=axs[2,i].imshow(encodedImg[i])
                 plt.colorbar(c1,ax=axs[2,i])
+        for i in range(0,Nevents):
+            for k in range(0,nFilters):
+                if i==0:
+                    axs[k+3,i].set(xlabel='cell_x',ylabel='cell_y',title='Activation_%i'%k)
+                else:
+                    axs[k+3,i].set(xlabel='cell_x',title='Activation_%i'%k)
+                    c1=axs[k+3,i].imshow(actImg[i,:,:,k])
+                    plt.colorbar(c1,ax=axs[k,i])
             
     #plt.tight_layout()
     plt.savefig("%s_examples.pdf"%name)
@@ -535,50 +564,125 @@ def buildmodels(options,pam_updates):
     # 4b/10b output: 128*16 * 6b = 12 288
     
     if(options.nElinks==2):
-        nBits_encod  = {'total':  3, 'integer': 1} 
+        nBits_encod  = {'total':  3, 'integer': 1,'keep_negative':0}
+        nBits_encod_total = 3 
     elif(options.nElinks==3):
-        nBits_encod  = {'total':  5, 'integer': 1}
+        nBits_encod  = {'total':  5, 'integer': 1,'keep_negative':0}
+        nBits_encod_total = 5
     elif(options.nElinks==4):
-        nBits_encod  = {'total':  7, 'integer': 1}
+        nBits_encod  = {'total':  7, 'integer': 1,'keep_negative':0}
+        nBits_encod_total = 7
     elif(options.nElinks==5):
-        nBits_encod  = {'total':  9, 'integer': 1}
+        nBits_encod  = {'total':  9, 'integer': 1,'keep_negative':0}
+        nBits_encod_total = 9
     else:
         print("must specify encoding bits for nElink =",options.nElinks)
 
-    nBits_input  = {'total': 10, 'integer': 3}
-    nBits_accum  = {'total': 11, 'integer': 3}
-    nBits_weight = {'total':  5, 'integer': 1} # sign bit not included
+    ##default
+    nBits_input  = {'total': 10, 'integer': 3, 'keep_negative':1}
+    nBits_accum  = {'total': 11, 'integer': 3, 'keep_negative':1}
+    nBits_weight = {'total':  5, 'integer': 1, 'keep_negative':1} # sign bit not included
     edim = 16
 
     if options.quantize:
         mymodname = "Jul24_qKeras"
+        #mymodname = "Jul24_qKeras_{}out{}b{}_{}b{}weights".format(edim,
+        #                                                         nBits_encod['total'], nBits_encod['integer'],
+        #                                                         nBits_weight['total'], nBits_weight['integer'])
     else:
         mymodname = "Jul24_keras"
 
     models = [
-        {'name': mymodname, 'ws': '', # custom
+
+        #{'name': "Aug11_qKeras_smoothSigmoid", 'ws': '', # custom
+        #'pams': {'shape': (4, 4, 3),
+        #         'channels_first': False,
+        #         'arrange': arrange443,
+        #         'encoded_dim': edim,
+        #         'loss': 'telescopeMSE',
+        #         'activation': 'smooth_sigmoid',
+        #     },
+        # 'isQK':True,
+        #},
+        #{'name': "Aug11_Keras" , 'ws': '', # custom
+        #'pams': {'shape': (4, 4, 3),
+        #         'channels_first': False,
+        #         'arrange': arrange443,
+        #         'encoded_dim': edim,
+        #         'loss': 'telescopeMSE',
+        #         'activation': 'sigmoid',
+        #     },
+        # 'isQK':False,
+        #},
+        {'name': "Aug14_qKeras_optA", 'ws': '', # custom
         'pams': {'shape': (4, 4, 3),
                  'channels_first': False,
                  'arrange': arrange443,
                  'encoded_dim': edim,
                  'loss': 'telescopeMSE',
+                 'nBits_encod'  : {'total':  nBits_encod_total, 'integer': 1,'keep_negative':0},
+                 'nBits_input'  : {'total': 10,                 'integer': 3,'keep_negative':1},
+                 'nBits_accum'  : {'total': 11,                 'integer': 3,'keep_negative':1},
+                 'nBits_weight' : {'total':  5,                 'integer': 1,'keep_negative':1},
              },
-         'isQK':options.quantize,
+         'isQK':True,
         },
-        
-    ]
+        #{'name': "Aug14_qKeras_optC", 'ws': '', # custom
+        #'pams': {'shape': (4, 4, 3),
+        #         'channels_first': False,
+        #         'arrange': arrange443,
+        #         'encoded_dim': edim,
+        #         'loss': 'telescopeMSE',
+        #         'activation': 'smooth_sigmoid',
+        #         'nBits_encod'  : {'total':  nBits_encod_total, 'integer': 0,'keep_negative':0},
+        #         'nBits_input'  : {'total': 10,                 'integer': 3,'keep_negative':1},
+        #         'nBits_accum'  : {'total': 11,                 'integer': 3,'keep_negative':1},
+        #         'nBits_weight' : {'total':  5,                 'integer': 1,'keep_negative':1},
+        #     },
+        # 'isQK':True,
+        #},
+        {'name': "Aug13_qKeras_optD", 'ws': '', # custom
+        'pams': {'shape': (4, 4, 3),
+                 'channels_first': False,
+                 'arrange': arrange443,
+                 'encoded_dim': edim,
+                 'loss': 'telescopeMSE',
+                 'activation': 'sigmoid',
+             },
+         'isQK':False,
+        },
+
+    ]    
     for m in models:
         if m['isQK']:
-            m['pams'].update({
-                'nBits_weight':nBits_weight,
-                'nBits_input':nBits_input,
-                'nBits_accum':nBits_accum,
-                'nBits_encod': nBits_encod,
-            })
-            print('nBits_weight',nBits_weight)
-            print( 'nBits_input', nBits_input)
-            print( 'nBits_accum', nBits_accum)
-            print( 'nBits_encod', nBits_encod)
+            #m['pams'].update({
+            #    'nBits_weight':nBits_weight,
+            #    'nBits_input':nBits_input,
+            #    'nBits_accum':nBits_accum,
+            #    'nBits_encod': nBits_encod,
+            #})
+            print('nBits_weight:', m['pams']['nBits_weight'])
+            print( 'nBits_input:', m['pams']['nBits_input' ])
+            print( 'nBits_accum:', m['pams']['nBits_accum' ])
+            print( 'nBits_encod:', m['pams']['nBits_encod' ])
+            bit_str = GetBitsString(m['pams']['nBits_input'],  m['pams']['nBits_accum'],
+                                    m['pams']['nBits_weight'], m['pams']['nBits_encod'],
+                                   (m['pams']['nBits_dense'] if 'nBits_dense'  in m['pams'] else False),
+                                   (m['pams']['nBits_conv'] if 'nBits_conv' in m['pams'] else False))
+            #mymodname += "_" + bit_str
+   
+        mymodname = m['name'] 
+        if os.path.exists(options.odir+mymodname+"/"+mymodname+".hdf5"):
+            if options.retrain:
+                print('Found weights, but going to re-train as told.')            
+                m['ws'] = ""
+            else:
+                print('Found weights, using it by default')
+                m['ws'] = mymodname+".hdf5"
+        else:
+            print('Have not found trained weights in dir:',options.odir+mymodname+"/"+mymodname+".hdf5")
+
+
         if pam_updates:
             m['pams'].update(pam_updates)
             print ('updated parameters for model',m['name'])
@@ -650,7 +754,7 @@ def compareModels(models,perf_dict,eval_settings,options):
 def evalModel(model,charges,aux_arrs,eval_settings,options):
 
     ### input arrays
-    input_Q      = charges['input_Q']
+    input_Q      = charges['input_Q']       #input Q image ,     (Nevent,12,4)
     input_Q_abs  = charges['input_Q_abs']
     cnn_deQ      = charges['cnn_deQ']
     cnn_enQ      = charges['cnn_enQ']
@@ -660,6 +764,18 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
     ae_out_frac = normalize(cnn_deQ.copy())
     ### axilliary arrays with shapes 
     occupancy_1MT = aux_arrs['occupancy_1MT']
+
+    # visualize conv2d activations
+    if not model['isQK']:
+        conv2d = kr.models.Model(
+            inputs =model['m_autoCNNen'].inputs,
+            outputs=model['m_autoCNNen'].get_layer("conv2d").output
+        )
+    else:
+        conv2d = kr.models.Model(
+            inputs =model['m_autoCNNen'].inputs,
+            outputs=model['m_autoCNNen'].get_layer("conv2d_0_m").output
+        )
 
 
     algnames    =eval_settings[  "algnames"  ] 
@@ -734,8 +850,14 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
         if(not options.skipPlot): plotHist([sumTCQ(input_Q_abs),sumTCQ(alg_out)],
                                            algname+"_absSumTCQ",xtitle="absolute charge",ytitle="48 TC arrays",
                                            stats=False,logy=True,leg=['input','output'])
+
+        # Encoded space distibution 
+        if((not options.skipPlot) and algname=='ae'): plotHist([cnn_enQ.flatten()],
+                                           "hist_"+algname+"_encoded",xtitle="AE encoded vector",ytitle="Entries",
+                                           stats=True,logy=True)
+
         # event displays
-        if(not options.skipPlot): visDisplays(index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=algname)
+        if(not options.skipPlot): visDisplays(index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=algname)
         for mname, metric in metrics.items():
             print('  '+mname)
             name = mname+"_"+algname
@@ -796,45 +918,46 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
                 # visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
                 if len(hi_index)>0:
                     hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
-                    visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q90")
+                    visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90")
                     hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
-                    visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q90_2")
+                    visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90_2")
                 if len(lo_index)>0:
                     lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
-                    visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q20")
+                    visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20")
                     lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
-                    visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])), name=name+"_Q20_2")
+                    visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20_2")
             
     # overlay different metrics
     for mname in metrics:
         chgs=[]
         occs=[]
-        for algname in alg_outs:
-            name = mname+"_"+algname
-            chgs += [(algname, plots["chg_"+mname+"_"+algname])]
-            occs += [(algname, plots["occ_"+mname+"_"+algname])]
-        xt = logMaxTitle if options.rescaleInputToMax else logTotTitle
-        OverlayPlots(chgs,"overlay_chg_"+mname,xtitle=xt,ytitle=mname)
-        OverlayPlots(occs,"overlay_occ_"+mname,xtitle=occTitle,ytitle=mname)
+        if(not options.skipPlot):
+            for algname in alg_outs:
+                name = mname+"_"+algname
+                chgs += [(algname, plots["chg_"+mname+"_"+algname])]
+                occs += [(algname, plots["occ_"+mname+"_"+algname])]
+            xt = logMaxTitle if options.rescaleInputToMax else logTotTitle
+            OverlayPlots(chgs,"overlay_chg_"+mname,xtitle=xt,ytitle=mname)
+            OverlayPlots(occs,"overlay_occ_"+mname,xtitle=occTitle,ytitle=mname)
 
-        # binned comparisons
-        for iocc, occ_lo in enumerate(occ_bins):
-            occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
-            occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
-            pname = "chg_{}occ{}_{}".format(occ_lo,occ_hi_s,name)
-            pname = "chg_{}occ{}".format(occ_lo,occ_hi_s)
-            chgs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
-            OverlayPlots(chgs,"overlay_chg_{}_{}occ{}".format(mname,occ_lo,occ_hi_s),
-                         xtitle=logMaxTitle,ytitle=mname,
-                         text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
-        for ichg, chg_lo in enumerate(chg_bins):
-            chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
-            chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
-            pname = "occ_{}chg{}".format(chg_lo,chg_hi_s)
-            occs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
-            OverlayPlots(occs,"overlay_occ_{}_{}chg{}".format(mname,chg_lo,chg_hi_s),
-                         xtitle=occTitle, ytitle=mname,
-                         text="{} <= Max Q < {}".format(chg_lo,chg_hi_s,name))
+            # binned comparisons
+            for iocc, occ_lo in enumerate(occ_bins):
+                occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
+                occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
+                pname = "chg_{}occ{}_{}".format(occ_lo,occ_hi_s,name)
+                pname = "chg_{}occ{}".format(occ_lo,occ_hi_s)
+                chgs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
+                OverlayPlots(chgs,"overlay_chg_{}_{}occ{}".format(mname,occ_lo,occ_hi_s),
+                             xtitle=logMaxTitle,ytitle=mname,
+                             text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
+            for ichg, chg_lo in enumerate(chg_bins):
+                chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
+                chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
+                pname = "occ_{}chg{}".format(chg_lo,chg_hi_s)
+                occs=[(algname, plots[pname+"_"+mname+"_"+algname]) for algname in alg_outs]
+                OverlayPlots(occs,"overlay_occ_{}_{}chg{}".format(mname,chg_lo,chg_hi_s),
+                             xtitle=occTitle, ytitle=mname,
+                             text="{} <= Max Q < {}".format(chg_lo,chg_hi_s,name))
 
     return plots,summary_dict
 
@@ -939,12 +1062,6 @@ def trainCNN(options, args, pam_updates=None):
     perf_dict={}
     for model in models:
         model_name = model['name']
-        if model['isQK']:
-            bit_str = GetBitsString(model['pams']['nBits_input'], model['pams']['nBits_accum'],
-                                    model['pams']['nBits_weight'], model['pams']['nBits_encod'],
-                                    (model['pams']['nBits_dense'] if 'nBits_dense'  in model['pams'] else False),
-                                    (model['pams']['nBits_conv'] if 'nBits_conv' in model['pams'] else False))
-            model_name += "_" + bit_str
         if not os.path.exists(model_name): os.mkdir(model_name)
         os.chdir(model_name)
 
@@ -985,6 +1102,7 @@ def trainCNN(options, args, pam_updates=None):
             val_max = val_max[:options.maxVal]
             val_sum = val_sum[:options.maxVal]
 
+
         if model['ws']=='':
             if options.quickTrain: 
                 train_input = train_input[:5000]
@@ -1002,7 +1120,9 @@ def trainCNN(options, args, pam_updates=None):
                                 n_epochs = options.epochs,
                                 )
         else:
-            save_models(m_autoCNN,model_name)
+            # do we want to save models if we do not train?
+            #save_models(m_autoCNN,model_name,model['isQK'])
+            pass
 
 
         print("Evaluate AE")
@@ -1013,6 +1133,8 @@ def trainCNN(options, args, pam_updates=None):
         np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
         np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
         np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
+
+
 
         # re-normalize outputs of AE for comparisons
         print("Restore normalization")
@@ -1065,6 +1187,7 @@ if __name__== "__main__":
     parser.add_option("--skipPlot", action='store_true', default = False,dest="skipPlot", help="skip the plotting step")
     parser.add_option("--full", action='store_true', default = False,dest="full", help="run all algorithms and metrics")
     parser.add_option("--quickTrain", action='store_true', default = False,dest="quickTrain", help="train w only 5k events for testing purposes")
+    parser.add_option("--retrain", action='store_true', default = False,dest="retrain", help="retrain models even if weights are already present for testing purposes")
     parser.add_option("--double", action='store_true', default = False,dest="double", help="test PU400 by combining PU200 events")
     parser.add_option("--evalOnly", action='store_true', default = False,dest="evalOnly", help="only evaluate the NN on the input sample, no train")
     parser.add_option("--overrideInput", action='store_true', default = False,dest="overrideInput", help="disable safety check on inputs")
