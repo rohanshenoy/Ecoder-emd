@@ -107,7 +107,8 @@ class qDenseCNN:
             'arrange': [],
             'arrMask': [],
             'n_copy': 0,  # no. of copy for hi occ datasets
-            'loss': ''
+            'loss': '',
+            'activation': 'relu',
         }
 
         self.weights_f = weights_f
@@ -170,7 +171,11 @@ class qDenseCNN:
         
     def GetQbits(self, inp, keep_negative=1):
         print("Setting bits {} {} with keep negative = {}".format(inp['total'], inp['integer'], keep_negative))
-        return qkr.quantized_bits(bits=inp['total'], integer=inp['integer'], keep_negative=keep_negative, alpha=1)
+        b =  qkr.quantized_bits(bits=inp['total'], integer=inp['integer'], keep_negative=keep_negative, alpha=1)
+        print('max = %s, min = %s'%(b.max(),b.min()))
+        print('str representation:%s'%(str(b)))
+        print('config = ',b.get_config())
+        return b
         
     def init(self, printSummary=True): # keep_negitive = 0 on inputs, otherwise for weights keep default (=1)
         encoded_dim = self.pams['encoded_dim']
@@ -191,11 +196,11 @@ class qDenseCNN:
         nBits_dense  = self.pams['nBits_dense'] if 'nBits_dense' in self.pams else nBits_weight
         nBits_conv   = self.pams['nBits_conv' ] if 'nBits_conv'  in self.pams else nBits_weight
 
-        input_Qbits  = self.GetQbits(nBits_input, keep_negative=1) #oddly fails if keep_neg=0
-        accum_Qbits  = self.GetQbits(nBits_accum, keep_negative=1)
-        dense_Qbits  = self.GetQbits(nBits_dense, keep_negative=1)
-        conv_Qbits   = self.GetQbits(nBits_conv,  keep_negative=1)
-        encod_Qbits  = self.GetQbits(nBits_encod, keep_negative=1)
+        input_Qbits  = self.GetQbits(nBits_input, nBits_input['keep_negative']) 
+        accum_Qbits  = self.GetQbits(nBits_accum, nBits_accum['keep_negative'])
+        dense_Qbits  = self.GetQbits(nBits_dense, nBits_dense['keep_negative'])
+        conv_Qbits   = self.GetQbits(nBits_conv , nBits_conv ['keep_negative'])
+        encod_Qbits  = self.GetQbits(nBits_encod, nBits_encod['keep_negative'])
         # keeping weights and bias same precision for now
 
         # define model
@@ -234,7 +239,9 @@ class qDenseCNN:
                            kernel_quantizer=dense_Qbits, bias_quantizer=dense_Qbits)(x)
 
 
-        x = QDense(encoded_dim, activation='relu', name='encoded_vector',
+        #x = QDense(encoded_dim, activation='relu', name='encoded_vector',
+        #                      kernel_quantizer=dense_Qbits, bias_quantizer=dense_Qbits)(x)
+        x = QDense(encoded_dim, activation=self.pams['activation'], name='encoded_vector',
                               kernel_quantizer=dense_Qbits, bias_quantizer=dense_Qbits)(x)
         encodedLayer = QActivation(encod_Qbits, name='encod_qa')(x)
 
@@ -324,20 +331,37 @@ class qDenseCNN:
     def get_models(self):
         return self.autoencoder, self.encoder
 
+    def invertArrange(self,arrange):
+        remap =[]
+        hashmap = {}
+        for i in range(len(arrange)):
+            hashmap[arrange[i]]=i
+        for i in range(len(arrange)):        
+            remap.append(hashmap[i])
+        return np.array(remap)
+
+    ## remap input/output of autoencoder into CALQs orders
+    def mapToCalQ(self,x):
+        if len(self.pams['arrange']) > 0:
+            arrange = self.pams['arrange']
+            remap   = self.invertArrange(arrange)
+            return x.reshape(len(x),48)[:,remap]
+        else:
+            return x.reshap(len(x),48)
+        
 
     def predict(self, x):
         decoded_Q = self.autoencoder.predict(x)
         encoded_Q = self.encoder.predict(x)
-        s = self.pams['shape']
-        if self.pams['channels_first']:
-            shaped_x = np.reshape(x, (len(x), s[0] * s[1], s[2]))
-            decoded_Q = np.reshape(decoded_Q, (len(decoded_Q), s[0] * s[1], s[2]))
-            encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
-        else:
-            shaped_x = np.reshape(x, (len(x), s[2] * s[1], s[0]))
-            decoded_Q = np.reshape(decoded_Q, (len(decoded_Q), s[2] * s[1], s[0]))
-            encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
-        return shaped_x, decoded_Q, encoded_Q
+        encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
+        #if self.pams['channels_first']:
+        #    shaped_x = np.reshape(x, (len(x), s[0] * s[1], s[2]))
+        #    decoded_Q = np.reshape(decoded_Q, (len(decoded_Q), s[0] * s[1], s[2]))
+        #    encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
+        #else:
+        #    shaped_x = np.reshape(x, (len(x), s[2] * s[1], s[0]))
+        #    decoded_Q = np.reshape(decoded_Q, (len(decoded_Q), s[2] * s[1], s[0]))
+        return x, decoded_Q, encoded_Q
 
     def summary(self):
         self.encoder.summary()

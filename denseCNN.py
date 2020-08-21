@@ -19,7 +19,8 @@ class denseCNN:
             'arrange'          : [],
             'arrMask'          : [],
             'n_copy'           : 0,      # no. of copy for hi occ datasets
-            'loss'             : ''
+            'loss'             : '',
+            'activation'       : 'relu'
         }
 
         self.weights_f =weights_f
@@ -112,7 +113,7 @@ class denseCNN:
         for n_nodes in Dense_layer_nodes:
             x = Dense(n_nodes,activation='relu')(x)
 
-        encodedLayer = Dense(encoded_dim, activation='relu',name='encoded_vector')(x)
+        encodedLayer = Dense(encoded_dim, activation=self.pams['activation'],name='encoded_vector')(x)
 
         # Instantiate Encoder Model
         self.encoder = Model(inputs, encodedLayer, name='encoder')
@@ -191,20 +192,40 @@ class denseCNN:
             self.autoencoder.load_weights(self.weights_f)
     def get_models(self):
        return self.autoencoder,self.encoder
+
+    def invertArrange(self,arrange):
+        remap =[]
+        hashmap = {}
+        for i in range(len(arrange)):
+            hashmap[arrange[i]]=i
+        for i in range(len(arrange)):        
+            remap.append(hashmap[i])
+        return np.array(remap)
+
+    ## remap input/output of autoencoder into CALQs orders
+    def mapToCalQ(self,x):
+        if len(self.pams['arrange']) > 0:
+            arrange = self.pams['arrange']
+            remap   = self.invertArrange(arrange)
+            return x.reshape(len(x),48)[:,remap]
+        else:
+            return x.reshap(len(x),48)
+
            
     def predict(self,x):
         decoded_Q = self.autoencoder.predict(x)
         encoded_Q = self.encoder.predict(x)
-        s = self.pams['shape'] 
-        if self.pams['channels_first']:
-            shaped_x  = np.reshape(x,(len(x),s[0]*s[1],s[2]))
-            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0]*s[1],s[2]))
-            encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
-        else:
-            shaped_x  = np.reshape(x,(len(x),s[2]*s[1],s[0]))
-            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[2]*s[1],s[0]))
-            encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
-        return shaped_x,decoded_Q, encoded_Q
+        encoded_Q = np.reshape(encoded_Q, (len(encoded_Q), self.pams['encoded_dim'], 1))
+        #s = self.pams['shape'] 
+        #if self.pams['channels_first']:
+        #    shaped_x  = np.reshape(x,(len(x),s[0]*s[1],s[2]))
+        #    decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0]*s[1],s[2]))
+        #    encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
+        #else:
+        #    shaped_x  = np.reshape(x,(len(x),s[2]*s[1],s[0]))
+        #    decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[2]*s[1],s[0]))
+        #    encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
+        return x,decoded_Q, encoded_Q
 
     def summary(self):
       self.encoder.summary()

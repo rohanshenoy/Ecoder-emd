@@ -28,6 +28,7 @@ from dense2DkernelCNN import dense2DkernelCNN
 #for earth movers distance calculation
 import ot
 import graphUtil
+import plotWafer
 
 
 def double_data(data):
@@ -412,34 +413,38 @@ def best_choice(inQ, n):
 #     x = np.where(x>=cut,x,0)
 #     return x
 
-def visDisplays(index,input_Q,decoded_Q,encoded_Q=np.array([]),conv2d=None,name='model_X'):
+def invertArrange(arrange):
+    remap =[]
+    hashmap = {}
+    for i in range(len(arrange)):
+        hashmap[arrange[i]]=i
+    for i in range(len(arrange)):        
+        remap.append(hashmap[i])
+    return remap 
+
+
+def visDisplays(index,input_Q,input_calQ,decoded_Q,encoded_Q=np.array([]),conv2d=None,name='model_X'):
     Nevents = len(index)
         
     inputImg    = input_Q[index]
+    inputImgCalQ= input_calQ[index]
     outputImg   = decoded_Q[index]
 
-    if conv2d is not None:
-        actImg      = conv2d.predict(inputImg.reshape(Nevents,4,4,3))
-        nFilters    = actImg.shape[-1]
-        nrows = 3+nFilters 
-        fig, axs = plt.subplots(nrows, Nevents, figsize=(16, 20))
-    else:
-        nrows = 3 if len(encoded_Q) else 2
-        fig, axs = plt.subplots(nrows, Nevents, figsize=(16, 10))
-    
-    for i in range(0,Nevents):
+  
+    fig, axs = plt.subplots(3, Nevents, figsize=(16, 10))
+    for i in range(Nevents):
         if i==0:
             axs[0,i].set(xlabel='',ylabel='cell_y',title='Input_%i'%i)
         else:
-            axs[0,i].set(xlabel='',title='Input_%i'%i)        
-            c1=axs[0,i].imshow(inputImg[i])
+            axs[0,i].set(xlabel='',title='Input_%i'%i)       
+        plotWafer.plotWafer( inputImgCalQ[i], fig, axs[0,i])
             
-    for i in range(0,Nevents):
+    for i in range(Nevents):
         if i==0:
             axs[1,i].set(xlabel='cell_x',ylabel='cell_y',title='CNN Ouput_%i'%i)        
         else:
             axs[1,i].set(xlabel='cell_x',title='CNN Ouput_%i'%i)
-            c1=axs[1,i].imshow(outputImg[i])
+        plotWafer.plotWafer( outputImg[i], fig, axs[1,i])
 
     if len(encoded_Q):
         encodedImg  = encoded_Q[index]
@@ -448,20 +453,32 @@ def visDisplays(index,input_Q,decoded_Q,encoded_Q=np.array([]),conv2d=None,name=
                 axs[2,i].set(xlabel='latent dim',ylabel='depth',title='Encoded_%i'%i)
             else:
                 axs[2,i].set(xlabel='latent dim',title='Encoded_%i'%i)
-                c1=axs[2,i].imshow(encodedImg[i])
+            c1=axs[2,i].imshow(encodedImg[i])
+            if i==Nevents:
                 plt.colorbar(c1,ax=axs[2,i])
-        for i in range(0,Nevents):
-            for k in range(0,nFilters):
-                if i==0:
-                    axs[k+3,i].set(xlabel='cell_x',ylabel='cell_y',title='Activation_%i'%k)
-                else:
-                    axs[k+3,i].set(xlabel='cell_x',title='Activation_%i'%k)
-                    c1=axs[k+3,i].imshow(actImg[i,:,:,k])
-                    plt.colorbar(c1,ax=axs[k,i])
             
     #plt.tight_layout()
     plt.savefig("%s_examples.pdf"%name)
     plt.close()
+
+    if conv2d is not None:
+        actImg      = conv2d.predict(inputImg.reshape(Nevents,4,4,3))
+        nFilters    = actImg.shape[-1]
+        nrows = nFilters 
+        fig, axs = plt.subplots(nrows, Nevents, figsize=(16, 20))
+
+        for i in range(0,Nevents):
+            for k in range(0,nFilters):
+                if i==0:
+                    axs[k,i].set(xlabel='cell_x',ylabel='cell_y',title='Activation_%i'%k)
+                else:
+                    axs[k,i].set(xlabel='cell_x',title='Activation_%i'%k)
+                c1=axs[k,i].imshow(actImg[i,:,:,k])
+                plt.colorbar(c1,ax=axs[k,i])
+
+        plt.savefig("%s_activations.pdf"%name)
+        plt.close()
+  
 
 def visMetric(input_Q,decoded_Q,metric,name,odir,skipPlot=False):
 
@@ -641,16 +658,16 @@ def buildmodels(options,pam_updates):
         #     },
         # 'isQK':True,
         #},
-        {'name': "Aug13_qKeras_optD", 'ws': '', # custom
-        'pams': {'shape': (4, 4, 3),
-                 'channels_first': False,
-                 'arrange': arrange443,
-                 'encoded_dim': edim,
-                 'loss': 'telescopeMSE',
-                 'activation': 'sigmoid',
-             },
-         'isQK':False,
-        },
+        #{'name': "Aug13_qKeras_optD", 'ws': '', # custom
+        #'pams': {'shape': (4, 4, 3),
+        #         'channels_first': False,
+        #         'arrange': arrange443,
+        #         'encoded_dim': edim,
+        #         'loss': 'telescopeMSE',
+        #         'activation': 'sigmoid',
+        #     },
+        # 'isQK':False,
+        #},
 
     ]    
     for m in models:
@@ -756,12 +773,16 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
     ### input arrays
     input_Q      = charges['input_Q']       #input Q image ,     (Nevent,12,4)
     input_Q_abs  = charges['input_Q_abs']
+    input_calQ   = charges['input_calQ']
+    output_calQ  = charges['output_calQ']
     cnn_deQ      = charges['cnn_deQ']
     cnn_enQ      = charges['cnn_enQ']
     val_sum      = charges['val_sum']
     val_max      = charges['val_max']
-    ae_out = unnormalize(cnn_deQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
-    ae_out_frac = normalize(cnn_deQ.copy())
+    ae_out = unnormalize(output_calQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
+    ae_out_frac = normalize(output_calQ.copy())
+    #ae_out = unnormalize(cnn_deQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
+    #ae_out_frac = normalize(cnn_deQ.copy())
     ### axilliary arrays with shapes 
     occupancy_1MT = aux_arrs['occupancy_1MT']
 
@@ -857,7 +878,7 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
                                            stats=True,logy=True)
 
         # event displays
-        if(not options.skipPlot): visDisplays(index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=algname)
+        if(not options.skipPlot): visDisplays(index, input_Q, input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=algname)
         for mname, metric in metrics.items():
             print('  '+mname)
             name = mname+"_"+algname
@@ -918,14 +939,14 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
                 # visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
                 if len(hi_index)>0:
                     hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
-                    visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90")
+                    visDisplays(hi_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90")
                     hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
-                    visDisplays(hi_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90_2")
+                    visDisplays(hi_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90_2")
                 if len(lo_index)>0:
                     lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
-                    visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20")
+                    visDisplays(lo_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20")
                     lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
-                    visDisplays(lo_index, input_Q, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20_2")
+                    visDisplays(lo_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20_2")
             
     # overlay different metrics
     for mname in metrics:
@@ -1127,6 +1148,9 @@ def trainCNN(options, args, pam_updates=None):
 
         print("Evaluate AE")
         input_Q, cnn_deQ, cnn_enQ = m.predict(val_input)
+        ## use physical arrangements for display
+        input_calQ  = m.mapToCalQ(input_Q)   # shape = (N,48) in CALQ order
+        output_calQ = m.mapToCalQ(cnn_deQ)   # shape = (N,48) in CALQ order
         print("Save CSVs")
         ## csv files for RTL verification
         N_csv= (options.nCSV if options.nCSV>=0 else input_Q.shape[0]) # about 80k
@@ -1145,8 +1169,10 @@ def trainCNN(options, args, pam_updates=None):
         occupancy_1MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48)>1.,axis=1)
 
         charges = {
-            'input_Q'    : input_Q, 
-            'input_Q_abs': input_Q_abs, 
+            'input_Q'    : input_Q,         # shape = (N,4,4,3)
+            'input_Q_abs': input_Q_abs,     # shape = (N,4,4,3) (in abs Q)
+            'input_calQ' : input_calQ,     # shape = (N,48)    (in CALQ 1-48 order)
+            'output_calQ': output_calQ,     # shape = (N,48)    (in CALQ 1-48 order)
             'cnn_deQ'    : cnn_deQ,
             'cnn_enQ'    : cnn_enQ,
             'val_sum'    : val_sum,
