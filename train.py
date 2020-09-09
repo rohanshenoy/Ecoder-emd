@@ -225,6 +225,7 @@ def train(autoencoder,encoder,train_input,train_target,val_input,name,n_epochs=1
                                   callbacks=[es]
         )
 
+    plt.figure(figsize=(8,6))
     plt.yscale('log')
     plt.plot(history.history['loss'])
     plt.plot(history.history['val_loss'])
@@ -234,7 +235,10 @@ def train(autoencoder,encoder,train_input,train_target,val_input,name,n_epochs=1
     plt.legend(['Train', 'Test'], loc='upper right')
     plt.savefig("history_%s.pdf"%name)
     plt.close()
+    plt.clf()
 
+    with open('./history_%s.pkl'%name, 'wb') as file_pi:
+        pickle.dump(history.history, file_pi)
 
     isQK = False
     for layer in autoencoder.layers[1].layers:
@@ -253,11 +257,11 @@ def save_models(autoencoder, name, isQK=False):
     autoencoder.save_weights('%s.hdf5'%name)
     encoder.save_weights('%s.hdf5'%("encoder_"+name))
     decoder.save_weights('%s.hdf5'%("decoder_"+name))
-    if isQK:
-       encoder_qWeight = model_save_quantized_weights(encoder) 
-       with open('encoder_'+name+'.pkl','wb') as f:       pickle.dump(encoder_qWeight,f)
-       encoder = graphUtil.setQuanitzedWeights(encoder,'encoder_'+name+'.pkl')
-       print('unique weights',len(np.unique(encoder.layers[5].get_weights()[0])))
+    #if isQK:
+    #   encoder_qWeight = model_save_quantized_weights(encoder) 
+    #   with open('encoder_'+name+'.pkl','wb') as f:       pickle.dump(encoder_qWeight,f)
+    #   encoder = graphUtil.setQuanitzedWeights(encoder,'encoder_'+name+'.pkl')
+    #   print('unique weights',len(np.unique(encoder.layers[5].get_weights()[0])))
     graphUtil.outputFrozenGraph(encoder,'encoder_'+name+'.pb')
     graphUtil.outputFrozenGraph(encoder,'encoder_'+name+'.pb.ascii','./',True)
     graphUtil.outputFrozenGraph(decoder,'decoder_'+name+'.pb')
@@ -609,7 +613,10 @@ def buildmodels(options,pam_updates):
     else:
         mymodname = "Jul24_keras"
 
-    models = [
+    from martinModels import models
+    for m in models:
+        m['pams'].update({'nBits_encod':nBits_encod})
+    #models = [
 
         #{'name': "Aug11_qKeras_smoothSigmoid", 'ws': '', # custom
         #'pams': {'shape': (4, 4, 3),
@@ -631,19 +638,19 @@ def buildmodels(options,pam_updates):
         #     },
         # 'isQK':False,
         #},
-        {'name': "Aug14_qKeras_optA", 'ws': '', # custom
-        'pams': {'shape': (4, 4, 3),
-                 'channels_first': False,
-                 'arrange': arrange443,
-                 'encoded_dim': edim,
-                 'loss': 'telescopeMSE',
-                 'nBits_encod'  : {'total':  nBits_encod_total, 'integer': 1,'keep_negative':0},
-                 'nBits_input'  : {'total': 10,                 'integer': 3,'keep_negative':1},
-                 'nBits_accum'  : {'total': 11,                 'integer': 3,'keep_negative':1},
-                 'nBits_weight' : {'total':  5,                 'integer': 1,'keep_negative':1},
-             },
-         'isQK':True,
-        },
+        #{'name': "Aug14_qKeras_optA", 'ws': '', # custom
+        #'pams': {'shape': (4, 4, 3),
+        #         'channels_first': False,
+        #         'arrange': arrange443,
+        #         'encoded_dim': edim,
+        #         'loss': 'telescopeMSE',
+        #         'nBits_encod'  : {'total':  nBits_encod_total, 'integer': 1,'keep_negative':0},
+        #         'nBits_input'  : {'total': 10,                 'integer': 3,'keep_negative':1},
+        #         'nBits_accum'  : {'total': 11,                 'integer': 3,'keep_negative':1},
+        #         'nBits_weight' : {'total':  5,                 'integer': 1,'keep_negative':1},
+        #     },
+        # 'isQK':True,
+        #},
         #{'name': "Aug14_qKeras_optC", 'ws': '', # custom
         #'pams': {'shape': (4, 4, 3),
         #         'channels_first': False,
@@ -669,7 +676,7 @@ def buildmodels(options,pam_updates):
         # 'isQK':False,
         #},
 
-    ]    
+    #]    
     for m in models:
         if m['isQK']:
             #m['pams'].update({
@@ -741,7 +748,8 @@ def compareModels(models,perf_dict,eval_settings,options):
             for model_name in perf_dict:
                 plots = perf_dict[model_name]
                 # name = mname+"_ae"
-                short_model = model_name.split('_')[0]
+                short_model = model_name
+                #short_model = model_name.split('_')[-1]
                 chgs += [(short_model, plots["chg_"+mname+"_ae"])]
                 occs += [(short_model, plots["occ_"+mname+"_ae"])]
             xt = logMaxTitle if options.rescaleInputToMax else logTotTitle
@@ -753,14 +761,14 @@ def compareModels(models,perf_dict,eval_settings,options):
                 occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
                 occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
                 pname = "{}occ{}".format(occ_lo,occ_hi_s)
-                chgs=[ (model_name.split('_')[0], perf_dict[model_name]["chg_{}_{}_ae".format(pname,mname)]) for model_name in perf_dict]
+                chgs=[ (model_name.split('_')[-1], perf_dict[model_name]["chg_{}_{}_ae".format(pname,mname)]) for model_name in perf_dict]
                 xt = logMaxTitle if options.rescaleInputToMax else logTotTitle
                 OverlayPlots(chgs,"ae_comp_chg_{}_{}".format(mname,pname),xtitle=xt,ytitle=mname)
             for ichg, chg_lo in enumerate(chg_bins):
                 chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
                 chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
                 pname = "{}chg{}".format(chg_lo,chg_hi_s)
-                occs=[ (model_name.split('_')[0], perf_dict[model_name]["occ_{}_{}_ae".format(pname,mname)]) for model_name in perf_dict]
+                occs=[ (model_name.split('_')[-1], perf_dict[model_name]["occ_{}_{}_ae".format(pname,mname)]) for model_name in perf_dict]
                 OverlayPlots(occs,"ae_comp_occ_{}_{}".format(mname,pname),xtitle=occTitle,ytitle=mname)
     for model in models:
         print('Summary_dict',model['summary_dict'])
@@ -779,8 +787,14 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
     cnn_enQ      = charges['cnn_enQ']
     val_sum      = charges['val_sum']
     val_max      = charges['val_max']
+
+    #print('input_Q'    ,input_Q[1]*35)
+    #print('input_Q_abs',input_Q_abs[1]*35)
+    #print('input_calQ' ,input_calQ[1]*35)
+    #print('val_sum' ,val_sum[1]*35)
     ae_out = unnormalize(output_calQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
     ae_out_frac = normalize(output_calQ.copy())
+
     #ae_out = unnormalize(cnn_deQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
     #ae_out_frac = normalize(cnn_deQ.copy())
     ### axilliary arrays with shapes 
@@ -788,10 +802,11 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
 
     # visualize conv2d activations
     if not model['isQK']:
-        conv2d = kr.models.Model(
-            inputs =model['m_autoCNNen'].inputs,
-            outputs=model['m_autoCNNen'].get_layer("conv2d").output
-        )
+        #conv2d = kr.models.Model(
+        #    inputs =model['m_autoCNNen'].inputs,
+        #    outputs=model['m_autoCNNen'].get_layer("conv2d").output
+        #)
+        conv2d  = None
     else:
         conv2d = kr.models.Model(
             inputs =model['m_autoCNNen'].inputs,
@@ -882,7 +897,16 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
         for mname, metric in metrics.items():
             print('  '+mname)
             name = mname+"_"+algname
-            vals = np.array([metric(input_Q_abs[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
+            if (algname =='ae' and mname=='EMD'):
+                #vals = np.array([metric(input_Q_abs[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
+                vals = np.array([metric(input_calQ[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
+                #low_index = (np.where(vals<np.quantile(vals,0.1)))[0]
+                #print("np.quantile(vals,0.1) =",np.quantile(vals,0.1))
+                #print("EMD: input calQ[1] =",np.round(input_calQ[low_index[0]],3))
+                #print("EMD: output Q[1] =",np.round(alg_out[low_index[0]],3))
+                #print("EMD: metric Q[1] =",metric(input_calQ[low_index[0]],alg_out[low_index[0]]))
+            else:
+                vals = np.array([metric(input_Q_abs[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
             model[name]        = np.round(np.mean(vals), 3)
             model[name+'_err'] = np.round(np.std(vals), 3)
             summary_dict[name]        = model[name]
@@ -936,7 +960,6 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
                 # displays
                 hi_index = (np.where(vals>np.quantile(vals,0.9)))[0]
                 lo_index = (np.where(vals<np.quantile(vals,0.2)))[0]
-                # visualize(input_Q,cnn_deQ,cnn_enQ,index,name=model_name)
                 if len(hi_index)>0:
                     hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
                     visDisplays(hi_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90")
@@ -1004,8 +1027,10 @@ def trainCNN(options, args, pam_updates=None):
     if os.path.isdir(options.inputFile):
         df_arr = []
         for infile in os.listdir(options.inputFile):
+            if os.path.isdir(options.inputFile+infile): continue
             infile = os.path.join(options.inputFile,infile)
             df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0, nrows = options.nrowsPerFile, usecols=[*range(0, 48)]))
+            #df_arr.append(pd.read_csv(infile, dtype=np.float64, header=0,  usecols=[*range(0, 48)]))
         data = pd.concat(df_arr)
         data = data.loc[(data.sum(axis=1) != 0)] #drop rows where occupancy = 0
         data.describe()
@@ -1047,6 +1072,8 @@ def trainCNN(options, args, pam_updates=None):
         # metrics to compute on the validation dataset
         'metrics' : {
             'EMD'      :emd,
+            'dMean':d_weighted_mean,
+            'dRMS':d_abs_weighted_rms,
         },
         "occ_nbins"   :12,
         "occ_range"   :(0,24),
@@ -1062,8 +1089,8 @@ def trainCNN(options, args, pam_updates=None):
     }
     if options.full:
         more_metrics = {
-            'dMean':d_weighted_mean,
-            'dRMS':d_abs_weighted_rms,
+            #'dMean':d_weighted_mean,
+            #'dRMS':d_abs_weighted_rms,
             #'zero_frac':(lambda x,y: np.all(y==0)),
             # 'cross_corr':cross_corr,
             # 'SSD'      :ssd,
@@ -1163,6 +1190,7 @@ def trainCNN(options, args, pam_updates=None):
         # re-normalize outputs of AE for comparisons
         print("Restore normalization")
         input_Q_abs = np.array([input_Q[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_Q))])
+        input_calQ  = np.array([input_calQ[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_calQ)) ])  # shape = (N,48) in CALQ order
         # input_Q_abs = np.multiply(input_Q, val_max)
 
         occupancy_0MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48),axis=1)
@@ -1171,8 +1199,8 @@ def trainCNN(options, args, pam_updates=None):
         charges = {
             'input_Q'    : input_Q,         # shape = (N,4,4,3)
             'input_Q_abs': input_Q_abs,     # shape = (N,4,4,3) (in abs Q)
-            'input_calQ' : input_calQ,     # shape = (N,48)    (in CALQ 1-48 order)
-            'output_calQ': output_calQ,     # shape = (N,48)    (in CALQ 1-48 order)
+            'input_calQ' : input_calQ,      # shape = (N,48) (in abs Q)   (in CALQ 1-48 order)
+            'output_calQ': output_calQ,     # shape = (N,48) (in fr Q)   (in CALQ 1-48 order)
             'cnn_deQ'    : cnn_deQ,
             'cnn_enQ'    : cnn_enQ,
             'val_sum'    : val_sum,
@@ -1182,7 +1210,8 @@ def trainCNN(options, args, pam_updates=None):
            'occupancy_1MT':occupancy_1MT 
         } 
         
-        perf_dict[model_name] , model['summary_dict'] = evalModel(model,charges,aux_arrs,eval_settings,options)
+        #perf_dict[model_name] , model['summary_dict'] = evalModel(model,charges,aux_arrs,eval_settings,options)
+        perf_dict[model['label']] , model['summary_dict'] = evalModel(model,charges,aux_arrs,eval_settings,options)
 
         occupancy=occupancy_0MT
         if(not options.skipPlot): plotHist(occupancy.flatten(),"occ",xtitle="occupancy",ytitle="evts",
