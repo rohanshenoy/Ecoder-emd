@@ -209,7 +209,7 @@ class denseCNN:
             remap   = self.invertArrange(arrange)
             return x.reshape(len(x),48)[:,remap]
         else:
-            return x.reshap(len(x),48)
+            return x.reshape(len(x),48)
 
            
     def predict(self,x):

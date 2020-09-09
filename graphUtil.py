@@ -126,6 +126,7 @@ def plotWeights(model,nBins=20):
     plt.yscale('log')            
     plt.legend()
     plt.savefig("%s_weights.pdf"%model.name)
+    plt.clf()
     
 #plot outputs from each layers given an input
 def plotOutputs(model,x,layer_indices=[],nBins=10):
@@ -145,4 +146,5 @@ def plotOutputs(model,x,layer_indices=[],nBins=10):
     plt.ylabel('Entries')
     str_layers = "_".join([str(l) for l in layer_indices])
     plt.savefig("hist_outputs_%s.pdf"%str_layers)
+    plt.clf()
     return
