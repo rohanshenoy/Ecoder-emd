@@ -3,7 +3,7 @@ ECON-T autoencoder model
 
 ## Setup 
 
-### On VM `klijnsma-gpu3`
+### On VM `klijnsma-gpu3` or any other Linux VM
 
 Get data and untar
 ```
@@ -11,6 +11,7 @@ mkdir data; cd data
 wget https://www.dropbox.com/s/502o1h5y0ukkasf/ecoder.tar.gz 
 tar -xvzf ecoder.tar.gz
 mv uscms/home/kkwok/eos/ecoder/* .
+rm -rf ecoder.tar.gz uscms
 ```
 
 Setup environment using miniconda3
