@@ -1,4 +1,4 @@
--# Ecoder
+# Ecoder
 ECON-T autoencoder model
 
 ## Setup 
@@ -18,15 +18,8 @@ Setup environment using miniconda3
 source install_miniconda3.sh #if your first time
 source setup.sh #also if your first time
 conda activate ecoder-env
-pip install keras tensorflow numba numpy pandas matplotlib tensorflow_model_optimization pillow ot
 ```
-Setup qkeras (h/t Thea!):
-```
-git clone https://github.com/google/qkeras.git
-cd qkeras
-python setup.py build
-python setup.py install --user
-cd ..
+
 ```
 ### Setup on LPC 
 If you are working on the LPC cluster working node, use the following scripts to setup the environment
