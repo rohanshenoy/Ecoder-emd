@@ -2,5 +2,5 @@
 
 echo "Environment setup script"
 
-conda create --name ecoder-env python=3.7.0
+conda env create -f environment.yml
 conda activate ecoder-env
