@@ -5,13 +5,9 @@ ECON-T autoencoder model
 
 ### On VM `klijnsma-gpu3` or any other Linux VM
 
-Get data and untar
+Get data from EOS at FNAL:
 ```
-mkdir data; cd data
-wget https://www.dropbox.com/s/502o1h5y0ukkasf/ecoder.tar.gz 
-tar -xvzf ecoder.tar.gz
-mv uscms/home/kkwok/eos/ecoder/* .
-rm -rf ecoder.tar.gz uscms
+/uscms/home/kkwok/eos/ecoder/V11
 ```
 
 Setup environment using miniconda3
@@ -49,9 +45,9 @@ Scripts to explore hyperparameters choices:
 ```
 ## edit parameters setting inside train.py
 ## train with 1 epoch to make sure model parameters are OK, output to a trainning folder
-python train.py -i ./data/pgun_pid1_pt200_200PU.csv  -o ./qjet_200PU/  --epoch 1
+python train.py -i /uscms/home/kkwok/eos/ecoder/V11/signal/nElinks_5/ -o ./test/ --epoch 1 --AEonly 1 --nELinks 5
 ## train the weights with max 150 epoch 
-python train.py -i ./data/pgun_pid1_pt200_200PU.csv  -o ./qjet_200PU/  --epoch 150
+python train.py -i /uscms/home/kkwok/eos/ecoder/V11/signal/nElinks_5/ -o ./test/ --epoch 150 --AEonly 1 --nELinks 5
 
 ## After producing a `.hdf5` file from trainning, you can re-run the model skipping the trainning phase.
 ## Do so by simply setting the model parameter 'ws' to `modelname.hdf5`
