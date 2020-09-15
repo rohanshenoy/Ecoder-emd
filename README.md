@@ -5,7 +5,7 @@ ECON-T autoencoder model
 
 ### On VM `klijnsma-gpu3` or any other Linux VM
 
-Get data from EOS at FNAL:
+Get data from FNAL LPC:
 ```
 /uscms/home/kkwok/eos/ecoder/V11
 ```
