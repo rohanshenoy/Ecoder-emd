@@ -18,11 +18,11 @@ conda activate ecoder-env
 ```
 
 ### Setup on LPC 
-If you are working on the LPC cluster working node, use the following scripts to setup the environment
-```
-source LPC_envSetup.sh      ##do this for the first time
-source lpc_env.sh           ##do this everytime
-```
+If you are working on the LPC cluster working node, check out a `CMSSW_11_1_X` and use the tensorflow version 
+that comes with `cmsenv`. If you have python default to run in python 2.7, run the scripts with `python3`.
+
+To obtain qkeras (for training with quantized bit constrains), clone the repo locally: 
+https://github.com/google/qkeras
 
 ## Juypter notebook demos
 Following files illustrates prototypes of different autoencoder architectures
@@ -31,13 +31,12 @@ Following files illustrates prototypes of different autoencoder architectures
 - `auto_CNN.ipynb` - 2D CNN autoencoder demo
 - `Auto_qCNN.ipynb` - 2D quantized CNN autoencoder, trained  with qKeras demo
 
-qkeras instructions: https://github.com/google/qkeras
 
 ## Training scripts 
 Scripts to explore hyperparameters choices:
 
-- `models.py`   - constructs and compile simple model architectures
 - `denseCNN.py` - model class for constructing conv2D-dense architectures
+- `qDenseCNN.py`- model class for constructing conv2D-dense architectures with qKeras
 - `train.py`    - train(or load weights) and evaluate models
 
 ## Example usage:
