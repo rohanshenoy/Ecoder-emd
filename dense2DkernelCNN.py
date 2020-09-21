@@ -1,4 +1,4 @@
-from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation, concatenate
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation, Concatenate, Lambda
 from tensorflow.keras.models import Model
 from tensorflow.keras import backend as K
 from tensorflow.keras.utils import plot_model
@@ -88,38 +88,25 @@ class dense2DkernelCNN:
         nnodes=CNN_layer_nodes[0] #8
         CNN_kernel=CNN_kernel_size[0] #3
 
-        inputs = Input(shape=self.pams['shape'])
+        inputs = Input(shape=self.pams['shape'], name='input_1')
         x = inputs
+        
+        x1 = Lambda(lambda x: x[:,:,:,0:1], output_shape=(4,4,1,), name='lambda_1')(x)
+        x2 = Lambda(lambda x: x[:,:,:,1:2], output_shape=(4,4,1,), name='lambda_2')(x)
+        x3 = Lambda(lambda x: x[:,:,:,2:3], output_shape=(4,4,1,), name='lambda_3')(x)
 
-        x1 = x[:,:,:,0]
-        x2 = x[:,:,:,1]
-        x3 = x[:,:,:,2]
+        conv = Conv2D(nnodes, CNN_kernel, activation='relu', name='conv2d_1')
+        x1 = conv(x1)
+        x2 = conv(x2)
+        x3 = conv(x3)
 
-        x1 = Reshape((4,4,1))(x1)
-        x2 = Reshape((4,4,1))(x2)
-        x3 = Reshape((4,4,1))(x3)
-
-        # testing
-        # print ("\n\nTESTING")
-        # print( x.shape )
-        # print( x2.shape )
-        # #print( x[0].shape )
-        # print ("\n")
-
-        x1 = Conv2D(nnodes, CNN_kernel, activation='relu')(x1)
-        x2 = Conv2D(nnodes, CNN_kernel, activation='relu')(x2)
-        x3 = Conv2D(nnodes, CNN_kernel, activation='relu')(x3)
-
-        x1 = Flatten()(x1)
-        x2 = Flatten()(x2)
-        x3 = Flatten()(x3)
+        x1 = Flatten(name='flatten_1')(x1)
+        x2 = Flatten(name='flatten_2')(x2)
+        x3 = Flatten(name='flatten_3')(x3)
 
         x = [x1,x2,x3]
-        x = concatenate(x)
+        x = Concatenate(axis=-1,name='concat_1')(x)
 
-        shape = K.int_shape(x)
-        #print("KINT SHAPE",shape)
-        
         encodedLayer = Dense(encoded_dim, activation='relu',name='encoded_vector')(x)
 
         # Instantiate Encoder Model
@@ -131,21 +118,23 @@ class dense2DkernelCNN:
         encoded_inputs = Input(shape=(encoded_dim,), name='decoder_input')
         x = encoded_inputs
 
-        x = Dense(96, activation='relu')(x)
+        x = Dense(96, activation='relu',name='dense_2')(x)
 
-        x = Reshape((2,2,nnodes,3))(x)
-        x1 = x[:,:,:,:,0]
-        x2 = x[:,:,:,:,1]
-        x3 = x[:,:,:,:,2]
+        x = Reshape((2,2,nnodes,3,),name='reshape_1')(x)
+        
+        x1 = Lambda(lambda x: x[:,:,:,:,0], output_shape=(2,2,nnodes,), name='lambda_4')(x)
+        x2 = Lambda(lambda x: x[:,:,:,:,1], output_shape=(2,2,nnodes,), name='lambda_5')(x)
+        x3 = Lambda(lambda x: x[:,:,:,:,2], output_shape=(2,2,nnodes,), name='lambda_6')(x)
 
         nchan=1
-        x1 = Conv2DTranspose(nchan, CNN_kernel, activation='relu')(x1)
-        x2 = Conv2DTranspose(nchan, CNN_kernel, activation='relu')(x2)
-        x3 = Conv2DTranspose(nchan, CNN_kernel, activation='relu')(x3)
+        conv_t = Conv2DTranspose(nchan, CNN_kernel, activation=None, name='conv2d_transpose_1')
+        x1 = conv_t(x1)
+        x2 = conv_t(x2)
+        x3 = conv_t(x3)
 
         x = [x1,x2,x3]
-        x = concatenate(x)
-
+        x = Concatenate(axis=-1,name='concat_2')(x)
+       
         outputs = Activation('sigmoid', name='decoder_output')(x)
 
         self.decoder = Model(encoded_inputs, outputs, name='decoder')
