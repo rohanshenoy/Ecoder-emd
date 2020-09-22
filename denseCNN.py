@@ -1,9 +1,31 @@
-from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation
+from tensorflow.keras.layers import Layer,Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Conv2DTranspose, Reshape, Activation
 from tensorflow.keras.models import Model
 from tensorflow.keras import backend as K
 import numpy as np
 import json
 from telescope import telescopeMSE2
+
+import tensorflow as tf
+
+class MaskLayer(Layer):
+    def __init__(self,nFilter,arrMask):
+        super(MaskLayer, self).__init__()
+        self.nFilter = tf.constant(nFilter)
+        self.arrayMask = np.array([arrMask])
+        self.mask = tf.reshape(tf.stack(
+                        tf.repeat(self.arrayMask,repeats=[nFilter],axis=0),axis=1),
+                        shape=[-1])      
+    def call(self, inputs):
+        return tf.reshape(tf.boolean_mask(inputs,self.mask,axis=1),
+                          shape=(tf.shape(inputs)[0],48*self.nFilter))
+    def get_config(self):
+        config = super().get_config().copy()
+        config.update({
+            'nFilter': self.nFilter.numpy(),
+            'arrMask': self.arrayMask.tolist(),
+        })
+        return config
+
 
 class denseCNN:
     def __init__(self,name='',weights_f=''):
@@ -18,6 +40,7 @@ class denseCNN:
             'channels_first'   : False,
             'arrange'          : [],
             'arrMask'          : [],
+            'maskConvOutput'   : False,
             'n_copy'           : 0,      # no. of copy for hi occ datasets
             'loss'             : '',
             'activation'       : 'relu'
@@ -109,6 +132,9 @@ class denseCNN:
 
         x = Flatten()(x)
 
+        if self.pams['maskConvOutput'] and len(self.pams['arrMask'])>0:
+            x = MaskLayer( nFilter = CNN_layer_nodes[-1] , arrMask = self.pams['arrMask'] )(x)
+
         #encoder dense nodes
         for n_nodes in Dense_layer_nodes:
             x = Dense(n_nodes,activation='relu')(x)
@@ -193,12 +219,16 @@ class denseCNN:
     def get_models(self):
        return self.autoencoder,self.encoder
 
-    def invertArrange(self,arrange):
+    def invertArrange(self,arrange,arrMask=[]):
         remap =[]
-        hashmap = {}
+        hashmap = {}  ## cell:index mapping
         for i in range(len(arrange)):
-            hashmap[arrange[i]]=i
-        for i in range(len(arrange)):        
+            if len(arrMask)>0 :
+                ## fill hashmap only if arrMask allows it
+                if arrMask[i]==1:   hashmap[arrange[i]]=i
+            else:
+                hashmap[arrange[i]]=i
+        for i in range(len(np.unique(arrange))):        
             remap.append(hashmap[i])
         return np.array(remap)
 
@@ -206,8 +236,14 @@ class denseCNN:
     def mapToCalQ(self,x):
         if len(self.pams['arrange']) > 0:
             arrange = self.pams['arrange']
-            remap   = self.invertArrange(arrange)
-            return x.reshape(len(x),48)[:,remap]
+            remap   = self.invertArrange(arrange,self.pams['arrMask'])
+            if len(self.pams['arrMask'])>0:
+                imgSize =self.pams['shape'][0] *self.pams['shape'][1]* self.pams['shape'][2]
+                x = x.reshape(len(x),imgSize)
+                x[:,self.pams['arrMask']==0]=0 ## apply arrMask
+                return x[:,remap]             ## map to calQ 
+            else:
+                return x.reshape(len(x),48)[:,remap]
         else:
             return x.reshape(len(x),48)
 
