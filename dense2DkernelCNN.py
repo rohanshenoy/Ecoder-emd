@@ -6,6 +6,9 @@ import numpy as np
 import json
 from telescope import telescopeMSE2
 
+import tensorflow as tf
+tf.keras.backend.set_floatx('float64')
+
 class dense2DkernelCNN:
     def __init__(self,name='',weights_f=''):
         self.name=name
@@ -14,7 +17,7 @@ class dense2DkernelCNN:
             'CNN_kernel_size'  : [3],
             'CNN_padding'      : ['same'],  
             'CNN_pool'         : [False],
-            'share_filters'    : False,
+            'share_filters'    : True,
             'Dense_layer_nodes': [], #does not include encoded layer
             'encoded_dim'      : 12,
             'shape'            : (4,4,3),
