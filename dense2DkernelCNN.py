@@ -7,7 +7,8 @@ import json
 from telescope import telescopeMSE2
 
 import tensorflow as tf
-tf.keras.backend.set_floatx('float64')
+##Need to use 32 bits for telescopeMSE
+tf.keras.backend.set_floatx('float32')
 
 from denseCNN import denseCNN
 
@@ -127,8 +128,8 @@ class dense2DkernelCNN(denseCNN):
             self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
             self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
         elif self.pams['loss'] == 'telescopeMSE':
-            self.autoencoder.compile(loss=telescopeMSE2, optimizer='adam', run_eagerly=True)
-            self.encoder.compile(loss=telescopeMSE2, optimizer='adam', run_eagerly=True)
+            self.autoencoder.compile(loss=telescopeMSE2, optimizer='adam')
+            self.encoder.compile(loss=telescopeMSE2, optimizer='adam')
         elif self.pams['loss']!='':
             self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
             self.encoder.compile(loss=self.pams['loss'], optimizer='adam')
