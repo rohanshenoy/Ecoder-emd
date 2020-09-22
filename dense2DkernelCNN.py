@@ -9,7 +9,9 @@ from telescope import telescopeMSE2
 import tensorflow as tf
 tf.keras.backend.set_floatx('float64')
 
-class dense2DkernelCNN:
+from denseCNN import denseCNN
+
+class dense2DkernelCNN(denseCNN):
     def __init__(self,name='',weights_f=''):
         self.name=name
         self.pams ={
@@ -31,55 +33,6 @@ class dense2DkernelCNN:
         self.weights_f =weights_f
         
 
-    def setpams(self,in_pams):
-        for k,v in in_pams.items():
-            self.pams[k] = v
-
-    def shuffle(self,arr):
-        order = np.arange(48)
-        np.random.shuffle(order)
-        return arr[:,order]
-    
-    def cloneInput(self,input_q,n_copy,occ_low,occ_hi):
-        shape = self.pams['shape']
-        nonzeroQs = np.count_nonzero(input_q.reshape(len(input_q),48),axis=1)
-        selection = np.logical_and(nonzeroQs<=occ_hi,nonzeroQs>occ_low)
-        occ_q     = input_q[selection]
-        occ_q_flat= occ_q.reshape(len(occ_q),48)
-        self.pams['cloned_fraction'] = len(occ_q)/len(input_q)
-        for i in range(0,n_copy):
-            clone   = self.shuffle(occ_q_flat)
-            clone   = clone.reshape(len(clone),shape[0],shape[1],shape[2])
-            input_q = np.concatenate([input_q,clone])
-        return input_q
-            
-    def prepInput(self,normData):
-      shape = self.pams['shape']
-      
-      if len(self.pams['arrange'])>0:
-          arrange = self.pams['arrange']
-          inputdata = normData[:,arrange]
-      else:
-          inputdata = normData
-      if len(self.pams['arrMask'])>0:
-          arrMask = self.pams['arrMask']
-          inputdata[:,arrMask==0]=0  #zeros out repeated entries
-      
-      shaped_data = inputdata.reshape(len(inputdata),shape[0],shape[1],shape[2])
-
-      if self.pams['n_copy']>0:
-        n_copy  = self.pams['n_copy']
-        occ_low = self.pams['occ_low']
-        occ_hi = self.pams['occ_hi']
-        shaped_data = self.cloneInput(shaped_data,n_copy,occ_low,occ_hi)
-
-      return shaped_data
-
-    def weightedMSE(self, y_true, y_pred):
-        y_true = K.cast(y_true, y_pred.dtype)
-        loss   = K.mean(K.square(y_true - y_pred)*K.maximum(y_pred,y_true),axis=(-1))
-        return loss
-            
     def init(self,printSummary=True):
         encoded_dim = self.pams['encoded_dim']
 
@@ -200,35 +153,3 @@ class dense2DkernelCNN:
         
         if not self.weights_f=='':
             self.autoencoder.load_weights(self.weights_f)
-    def get_models(self):
-       return self.autoencoder,self.encoder
-           
-    def predict(self,x):
-        decoded_Q = self.autoencoder.predict(x)
-        encoded_Q = self.encoder.predict(x)
-        s = self.pams['shape'] 
-        if self.pams['channels_first']:
-            shaped_x  = np.reshape(x,(len(x),s[0]*s[1],s[2]))
-            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[0]*s[1],s[2]))
-            encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
-        else:
-            shaped_x  = np.reshape(x,(len(x),s[2]*s[1],s[0]))
-            decoded_Q = np.reshape(decoded_Q,(len(decoded_Q),s[2]*s[1],s[0]))
-            encoded_Q = np.reshape(encoded_Q,(len(encoded_Q),self.pams['encoded_dim'],1))
-        return shaped_x,decoded_Q, encoded_Q
-
-    def summary(self):
-      self.encoder.summary()
-      self.decoder.summary()
-      self.autoencoder.summary()
-
-    ##get pams for writing json
-    def get_pams(self):
-      jsonpams={}
-      for k,v in self.pams.items():
-          if type(v)==type(np.array([])):
-              jsonpams[k] = v.tolist()
-          else:
-              jsonpams[k] = v 
-      return jsonpams   
-      
