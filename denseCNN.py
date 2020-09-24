@@ -35,12 +35,13 @@ class denseCNN:
             'CNN_kernel_size'  : [3],
             'CNN_pool'         : [False],
             'Dense_layer_nodes': [], #does not include encoded layer
-            'encoded_dim'      : 12,
-            'shape'            : (1,4,4),
+            'encoded_dim'      : 16,
+            'shape'            : (4,4,3),
             'channels_first'   : False,
             'arrange'          : [],
             'arrMask'          : [],
-            'maskConvOutput'   : False,
+            'calQMask'         : [],
+            'maskConvOutput'   : [],
             'n_copy'           : 0,      # no. of copy for hi occ datasets
             'loss'             : '',
             'activation'       : 'relu'
@@ -132,8 +133,10 @@ class denseCNN:
 
         x = Flatten()(x)
 
-        if self.pams['maskConvOutput'] and len(self.pams['arrMask'])>0:
-            x = MaskLayer( nFilter = CNN_layer_nodes[-1] , arrMask = self.pams['arrMask'] )(x)
+        if len(self.pams['maskConvOutput'])>0:
+            if np.count_nonzero(self.pams['maskConvOutput'])!=48:
+                raise ValueError("Trying to mask conv output with an array mask that does not contain exactly 48 calQ location. maskConvOutput = ",self.pams['maskConvOutput'])
+            x = MaskLayer( nFilter = CNN_layer_nodes[-1] , arrMask = self.pams['maskConvOutput'] )(x)
 
         #encoder dense nodes
         for n_nodes in Dense_layer_nodes:
@@ -219,16 +222,36 @@ class denseCNN:
     def get_models(self):
        return self.autoencoder,self.encoder
 
-    def invertArrange(self,arrange,arrMask=[]):
+    def invertArrange(self,arrange,arrMask=[],calQMask=[]):
         remap =[]
         hashmap = {}  ## cell:index mapping
+        ##Valid arrange check
+        if not np.all(np.unique(arrange)==np.arange(48)):
+            raise ValueError("Found cell location with number > 48. Please check your arrange:",arrange)
+        foundDuplicateCharge = False
+        if len(arrMask)==0:
+            if len(arrange)>len(np.unique(arrange)):
+                foundDuplicateCharge=True
+        else:
+            if len(arrange[arrMask==1])>len(np.unique(arrange[arrMask==1])):
+                foundDuplicateCharge=True
+    
+        if foundDuplicateCharge and len(calQMask)==0:
+            raise ValueError("Found duplicated charge arrangement, but did not specify calQmask")  
+        if len(calQMask)>0 and np.count_nonzero(calQMask)!=48:
+            raise ValueError("calQmask must indicate 48 calQ ")  
+            
         for i in range(len(arrange)):
             if len(arrMask)>0 :
                 ## fill hashmap only if arrMask allows it
-                if arrMask[i]==1:   hashmap[arrange[i]]=i
+                if arrMask[i]==1:   
+                    if(foundDuplicateCharge and calQMask[i]==1):
+                        ## fill hashmap only if calQMask allows it
+                        hashmap[arrange[i]]=i                    
             else:
                 hashmap[arrange[i]]=i
-        for i in range(len(np.unique(arrange))):        
+        ## Always map to 48 calQ orders
+        for i in range(len(np.unique(arrange))):
             remap.append(hashmap[i])
         return np.array(remap)
 
@@ -236,7 +259,7 @@ class denseCNN:
     def mapToCalQ(self,x):
         if len(self.pams['arrange']) > 0:
             arrange = self.pams['arrange']
-            remap   = self.invertArrange(arrange,self.pams['arrMask'])
+            remap   = self.invertArrange(arrange,self.pams['arrMask'],self.pams['calQMask'])
             if len(self.pams['arrMask'])>0:
                 imgSize =self.pams['shape'][0] *self.pams['shape'][1]* self.pams['shape'][2]
                 x = x.reshape(len(x),imgSize)
