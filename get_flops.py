@@ -3,11 +3,11 @@ import os
 import numpy as np
 from tensorflow.keras.models import model_from_json
 from tensorflow.python.framework.convert_to_constants import convert_variables_to_constants_v2
-
+from denseCNN import MaskLayer
 
 def get_flops_from_pb_v2(model_json):
     with open(model_json,'r') as fjson:
-        model = model_from_json(fjson.read())
+        model = model_from_json(fjson.read(),custom_objects={'MaskLayer':MaskLayer})
         hdf5  = model_json.replace('json','hdf5')
         model.load_weights(hdf5)
         model.summary()
@@ -20,6 +20,7 @@ def get_flops_from_pb_v2(model_json):
         frozen_func.graph.as_graph_def()
         layers = [op.name for op in frozen_func.graph.get_operations()]
 
+        for l in layers: print(l)
         # Calculate FLOPS with tf.profiler
         run_meta = tf.compat.v1.RunMetadata()
         opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
@@ -31,22 +32,40 @@ def get_flops_from_pb_v2(model_json):
 if __name__=='__main__':
 
     flist = [
-         './V11/signal/nElinks_5/Sep1_CNN_keras_norm/encoder_Sep1_CNN_keras_norm.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v12/encoder_Sep1_CNN_keras_v12.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v13/encoder_Sep1_CNN_keras_v13.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v14/encoder_Sep1_CNN_keras_v14.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v8/encoder_Sep1_CNN_keras_v8.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v9/encoder_Sep1_CNN_keras_v9.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v10/encoder_Sep1_CNN_keras_v10.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v1/encoder_Sep1_CNN_keras_v1.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v2/encoder_Sep1_CNN_keras_v2.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v3/encoder_Sep1_CNN_keras_v3.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v4/encoder_Sep1_CNN_keras_v4.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v7/encoder_Sep1_CNN_keras_v7.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v5/encoder_Sep1_CNN_keras_v5.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v6/encoder_Sep1_CNN_keras_v6.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v15/encoder_Sep1_CNN_keras_v15.json',
-         './V11/signal/nElinks_5/Sep1_CNN_keras_v16/encoder_Sep1_CNN_keras_v16.json'
+        #'./oldModels/4x4_v4/encoder_4x4_v4.json'
+        './oldModels/4x4_norm_v4/encoder_4x4_norm_v4.json',
+        './oldModels/4x4_norm_v8/encoder_4x4_norm_v8.json',
+        './oldModels/4x4_norm_d10/encoder_4x4_norm_d10.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_norm/encoder_Sep1_CNN_keras_norm.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v12/encoder_Sep1_CNN_keras_v12.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v13/encoder_Sep1_CNN_keras_v13.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v14/encoder_Sep1_CNN_keras_v14.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v8/encoder_Sep1_CNN_keras_v8.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v9/encoder_Sep1_CNN_keras_v9.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v10/encoder_Sep1_CNN_keras_v10.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v1/encoder_Sep1_CNN_keras_v1.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v2/encoder_Sep1_CNN_keras_v2.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v3/encoder_Sep1_CNN_keras_v3.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v4/encoder_Sep1_CNN_keras_v4.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v7/encoder_Sep1_CNN_keras_v7.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v5/encoder_Sep1_CNN_keras_v5.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v6/encoder_Sep1_CNN_keras_v6.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v15/encoder_Sep1_CNN_keras_v15.json',
+         #'./V11/signal/nElinks_5/Sep1_CNN_keras_v16/encoder_Sep1_CNN_keras_v16.json'
+         #'./V11/signal/nElinks_5/Sep9_CNN_keras_8x8_v1/encoder_Sep9_CNN_keras_8x8_v1.json',
+         #'./V11/signal/nElinks_5/Sep9_CNN_keras_8x8_v2/encoder_Sep9_CNN_keras_8x8_v2.json',
+         #'./V11/signal/nElinks_5/Sep9_CNN_keras_8x8_v3/encoder_Sep9_CNN_keras_8x8_v3.json',
+         #'./V11/signal/nElinks_5/Sep9_CNN_keras_8x8_v4/encoder_Sep9_CNN_keras_8x8_v4.json',
+         #'./V11/signal/nElinks_5/Sep9_CNN_keras_8x8_v7.2/encoder_Sep9_CNN_keras_8x8_v7.2.json',
+         #'./V11/signal/nElinks_5/Sep9_CNN_keras_8x8_v8.2/encoder_Sep9_CNN_keras_8x8_v8.2.json',
+         #'./V11/signal/nElinks_5/Sep9_CNN_keras_8x8_v9.2/encoder_Sep9_CNN_keras_8x8_v9.2.json',
+
+         #'./V11/signal/nElinks_5/Sep9_CNN_keras_8x8_v10/encoder_Sep9_CNN_keras_8x8_v10.json',
+         #'./V11/signal/nElinks_5/Sep9_CNN_keras_8x8_v11/encoder_Sep9_CNN_keras_8x8_v11.json',
+
+         #'./V11/signal/nElinks_5/Sep21_CNN_keras_SepConv_v1/encoder_Sep21_CNN_keras_SepConv_v1.json',
+         #'./V11/signal/nElinks_5/Sep21_CNN_keras_SepConv_v2/encoder_Sep21_CNN_keras_SepConv_v2.json',
+         #'./V11/signal/nElinks_5/Sep21_CNN_keras_SepConv_v3/encoder_Sep21_CNN_keras_SepConv_v3.json',
          ]
     results = {}
     for f in flist:

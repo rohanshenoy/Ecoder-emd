@@ -111,6 +111,7 @@ class denseCNN:
 
         CNN_layer_nodes   = self.pams['CNN_layer_nodes']
         CNN_kernel_size   = self.pams['CNN_kernel_size']
+        CNN_padding       = self.pams['CNN_padding']
         CNN_pool          = self.pams['CNN_pool']
         Dense_layer_nodes = self.pams['Dense_layer_nodes'] #does not include encoded layer
         channels_first    = self.pams['channels_first']
@@ -120,9 +121,9 @@ class denseCNN:
 
         for i,n_nodes in enumerate(CNN_layer_nodes):
             if channels_first:
-              x = Conv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',data_format='channels_first')(x)
+              x = Conv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding=CNN_padding[i],data_format='channels_first')(x)
             else:
-              x = Conv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding='same')(x)
+              x = Conv2D(n_nodes, CNN_kernel_size[i], activation='relu', padding=CNN_padding[i])(x)
             if CNN_pool[i]:
               if channels_first:
                 x = MaxPooling2D((2, 2), padding='same',data_format='channels_first')(x)
@@ -168,15 +169,15 @@ class denseCNN:
                   x = UpSampling2D((2, 2))(x)
             
             if channels_first:
-              x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same',data_format='channels_first')(x)
+              x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding=CNN_padding[i],data_format='channels_first')(x)
             else:
-              x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding='same')(x)
+              x = Conv2DTranspose(n_nodes, CNN_kernel_size[i], activation='relu', padding=CNN_padding[i])(x)
 
         if channels_first:
           #shape[0] will be # of channel
-          x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=CNN_kernel_size[0],padding='same',data_format='channels_first')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=CNN_kernel_size[0],padding=CNN_padding[0],data_format='channels_first')(x)
         else:
-          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=CNN_kernel_size[0],padding='same')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=CNN_kernel_size[0],padding=CNN_padding[0])(x)
 
         outputs = Activation('sigmoid', name='decoder_output')(x)
 
@@ -245,8 +246,10 @@ class denseCNN:
             if len(arrMask)>0 :
                 ## fill hashmap only if arrMask allows it
                 if arrMask[i]==1:   
-                    if(foundDuplicateCharge and calQMask[i]==1):
+                    if(foundDuplicateCharge):
                         ## fill hashmap only if calQMask allows it
+                        if calQMask[i]==1: hashmap[arrange[i]]=i                    
+                    else:
                         hashmap[arrange[i]]=i                    
             else:
                 hashmap[arrange[i]]=i

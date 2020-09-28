@@ -27,6 +27,7 @@ class dense2DkernelCNN(denseCNN):
             'channels_first'   : False,
             'arrange'          : [],
             'arrMask'          : [],
+            'calQMask'         : [],
             'n_copy'           : 0,      # no. of copy for hi occ datasets
             'loss'             : ''
         }
