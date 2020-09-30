@@ -140,13 +140,13 @@ defaults = {    'shape':(4,4,3),
                  'nBits_weight' : {'total':  5,                 'integer': 1,'keep_negative':1},
 }
 models = [
-    {'name':'Sep1_CNN_keras_norm','label':'nom','pams':{
-             'CNN_layer_nodes':[8],
-             'CNN_kernel_size':[3],
-             'CNN_padding':['same'],
-             'CNN_pool':[False],
-        },
-    },
+    #{'name':'Sep1_CNN_keras_norm','label':'nom','pams':{
+    #         'CNN_layer_nodes':[8],
+    #         'CNN_kernel_size':[3],
+    #         'CNN_padding':['same'],
+    #         'CNN_pool':[False],
+    #    },
+    #},
 
 #    {'name':'Sep1_CNN_keras_v12','label':'dim12','pams':{
 #             'CNN_layer_nodes':[8],
@@ -382,6 +382,26 @@ models = [
     #         'CNN_padding':['valid'],
     #    },
     #},
+
+    ### with extra decoder layer
+    #{'name':'Sep29_SepConv_663_pool','label':'SepConv_663_pool_decoder','isDense2D':True,'pams':{
+    #         'shape':(6,6,3),'arrange':arrange663,'arrMask':arrange663_mask,'calQMask':arrange663_CalQmask,'loss':'weightedMSE',
+    #         'CNN_layer_nodes':[8],
+    #         'CNN_kernel_size':[3],
+    #         'CNN_pool':[True],
+    #         'CNN_padding':['valid'],
+    #    },
+    #},
+    {'name':'Sep29_SepConv_663_pool_v3','label':'SepConv_663_pool_trv3','isDense2D':True,'pams':{
+             'shape':(6,6,3),'arrange':arrange663,'arrMask':arrange663_mask,'calQMask':arrange663_CalQmask,'loss':'weightedMSE',
+             'CNN_layer_nodes':[8],
+             'CNN_kernel_size':[3],
+             'CNN_pool':[True],
+             'CNN_padding':['valid'],
+        },
+    },
+
+
     #{'name':'Sep26_663','label':'Conv_663','isDense2D':False,'pams':{
     #         'shape':(6,6,3),'arrange':arrange663,'arrMask':arrange663_mask,'calQMask':arrange663_CalQmask,'loss':'weightedMSE',
     #         'CNN_layer_nodes':[8],
@@ -390,8 +410,22 @@ models = [
     #         'CNN_padding':['valid'],
     #    },
     #},
-
-
+    #{'name':'Sep26_SepConv_663_c4','label':'SepConv_663_c[4]','isDense2D':True,'pams':{
+    #         'shape':(6,6,3),'arrange':arrange663,'arrMask':arrange663_mask,'calQMask':arrange663_CalQmask,'loss':'weightedMSE',
+    #         'CNN_layer_nodes':[4],
+    #         'CNN_kernel_size':[3],
+    #         'CNN_pool':[False],
+    #         'CNN_padding':['valid'],
+    #    },
+    #},
+    #{'name':'Sep26_SepConv_663_c2','label':'SepConv_663_c[2]','isDense2D':True,'pams':{
+    #         'shape':(6,6,3),'arrange':arrange663,'arrMask':arrange663_mask,'calQMask':arrange663_CalQmask,'loss':'weightedMSE',
+    #         'CNN_layer_nodes':[2],
+    #         'CNN_kernel_size':[3],
+    #         'CNN_pool':[False],
+    #         'CNN_padding':['valid'],
+    #    },
+    #},
 
 
 
