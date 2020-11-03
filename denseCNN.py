@@ -6,6 +6,7 @@ import json
 from telescope import telescopeMSE2
 
 import tensorflow as tf
+import inspect
 
 class MaskLayer(Layer):
     def __init__(self,nFilter,arrMask):
@@ -34,6 +35,7 @@ class denseCNN:
             'CNN_layer_nodes'  : [8],  #n_filters
             'CNN_kernel_size'  : [3],
             'CNN_pool'         : [False],
+            'CNN_padding'      : ['same'],
             'Dense_layer_nodes': [], #does not include encoded layer
             'encoded_dim'      : 16,
             'shape'            : (4,4,3),
@@ -44,7 +46,8 @@ class denseCNN:
             'maskConvOutput'   : [],
             'n_copy'           : 0,      # no. of copy for hi occ datasets
             'loss'             : '',
-            'activation'       : 'relu'
+            'activation'       : 'relu',
+            'optimizer'       : 'adam',
         }
 
         self.weights_f =weights_f
@@ -175,9 +178,9 @@ class denseCNN:
 
         if channels_first:
           #shape[0] will be # of channel
-          x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=CNN_kernel_size[0],padding=CNN_padding[0],data_format='channels_first')(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][0],kernel_size=CNN_kernel_size[0],padding='same',data_format='channels_first')(x)
         else:
-          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=CNN_kernel_size[0],padding=CNN_padding[0])(x)
+          x = Conv2DTranspose(filters=self.pams['shape'][2],kernel_size=CNN_kernel_size[0],padding='same')(x)
 
         outputs = Activation('sigmoid', name='decoder_output')(x)
 
@@ -190,18 +193,20 @@ class denseCNN:
         if printSummary:
           self.autoencoder.summary()
 
+        opt = self.pams['optimizer']
+
         if self.pams['loss']=="weightedMSE":
-            self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
-            self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
+            self.autoencoder.compile(loss=self.weightedMSE, optimizer=opt)
+            self.encoder.compile(loss=self.weightedMSE, optimizer=opt)
         elif self.pams['loss'] == 'telescopeMSE':
-            self.autoencoder.compile(loss=telescopeMSE2, optimizer='adam')
-            self.encoder.compile(loss=telescopeMSE2, optimizer='adam')
+            self.autoencoder.compile(loss=telescopeMSE2, optimizer=opt)
+            self.encoder.compile(loss=telescopeMSE2, optimizer=opt)
         elif self.pams['loss']!='':
-            self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
-            self.encoder.compile(loss=self.pams['loss'], optimizer='adam')
+            self.autoencoder.compile(loss=self.pams['loss'], optimizer=opt)
+            self.encoder.compile(loss=self.pams['loss'], optimizer=opt)
         else:
-            self.autoencoder.compile(loss='mse', optimizer='adam')
-            self.encoder.compile(loss='mse', optimizer='adam')
+            self.autoencoder.compile(loss='mse', optimizer=opt)
+            self.encoder.compile(loss='mse', optimizer=opt)
 
         CNN_layers=''
         if len(CNN_layer_nodes)>0:
@@ -296,10 +301,16 @@ class denseCNN:
 
     ##get pams for writing json
     def get_pams(self):
-      jsonpams={}
+      jsonpams={}      
+      opt_classes = tuple(opt[1] for opt in inspect.getmembers(tf.keras.optimizers,inspect.isclass))
       for k,v in self.pams.items():
           if type(v)==type(np.array([])):
               jsonpams[k] = v.tolist()
+          elif  isinstance(v,opt_classes):
+              config = {}
+              for hp in v.get_config():
+                config[hp] = str(v.get_config()[hp])
+              jsonpams[k] = config
           else:
               jsonpams[k] = v 
       return jsonpams   
