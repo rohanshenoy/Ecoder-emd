@@ -29,6 +29,7 @@ from dense2DkernelCNN import dense2DkernelCNN
 import ot
 import graphUtil
 import plotWafer
+from get_flops import get_flops_from_model
 
 
 def double_data(data):
@@ -158,7 +159,7 @@ def plotProfile(x,y,name,odir='.',xtitle="",ytitle="Entries",nbins=40,lims=None,
 #    return bin_centers, means, standard_deviations
     return bin_centers, median, [loe,hie]
 
-def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.',text=""):
+def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.',text="",ylim=None):
     #print('overlay: ',name)
     centers = results[0][1][0]
     wid = centers[1]-centers[0]
@@ -176,6 +177,8 @@ def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.',text=""):
     ax = plt.gca()
     plt.text(0.1, 0.9, name, transform=ax.transAxes)
     if text: plt.text(0.1, 0.82, text.replace('MAX','inf'), transform=ax.transAxes)
+    if ylim is not None:
+        plt.ylim(ylim[0],ylim[1])
     plt.xlabel(xtitle)
     plt.ylabel(ytitle)
     plt.legend(loc='upper right')
@@ -187,18 +190,24 @@ def OverlayPlots(results, name, xtitle="",ytitle="Entries",odir='.',text=""):
 
     return
 
-def split(shaped_data, validation_frac=0.2):
+def split(shaped_data, validation_frac=0.2,randomize=False):
     N = round(len(shaped_data)*validation_frac)
     
-    #randomly select 25% entries
-    val_index = np.random.choice(shaped_data.shape[0], N, replace=False)
-    #select the indices of the other 75%
-    full_index = np.array(range(0,len(shaped_data)))
-    train_index = np.logical_not(np.in1d(full_index,val_index))
-  
-    val_input = shaped_data[val_index]
-    train_input = shaped_data[train_index]
-
+    if randomize:
+        #randomly select 25% entries
+        val_index = np.random.choice(shaped_data.shape[0], N, replace=False)
+        #select the indices of the other 75%
+        full_index = np.array(range(0,len(shaped_data)))
+        train_index = np.logical_not(np.in1d(full_index,val_index))
+      
+        val_input = shaped_data[val_index]
+        train_input = shaped_data[train_index]
+    else:
+        val_input = shaped_data[:N]
+        train_input = shaped_data[N:]
+        val_index = np.arange(N)
+        train_index = np.arange(len(shaped_data))[N:]
+    
     print('training shape',train_input.shape)
     print('validation shape',val_input.shape)
 
@@ -207,6 +216,7 @@ def split(shaped_data, validation_frac=0.2):
 def train(autoencoder,encoder,train_input,train_target,val_input,name,n_epochs=100, train_weights=None):
 
     es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=3)
+    #reduce_lr = callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5,patience=3)
     if train_weights != None:
         history = autoencoder.fit(train_input,train_target,
                                   #sample_weight=train_weights,
@@ -257,11 +267,11 @@ def save_models(autoencoder, name, isQK=False):
     autoencoder.save_weights('%s.hdf5'%name)
     encoder.save_weights('%s.hdf5'%("encoder_"+name))
     decoder.save_weights('%s.hdf5'%("decoder_"+name))
-    #if isQK:
-    #   encoder_qWeight = model_save_quantized_weights(encoder) 
-    #   with open('encoder_'+name+'.pkl','wb') as f:       pickle.dump(encoder_qWeight,f)
-    #   encoder = graphUtil.setQuanitzedWeights(encoder,'encoder_'+name+'.pkl')
-    #   print('unique weights',len(np.unique(encoder.layers[5].get_weights()[0])))
+    if isQK:
+       encoder_qWeight = model_save_quantized_weights(encoder) 
+       with open('encoder_'+name+'.pkl','wb') as f:       pickle.dump(encoder_qWeight,f)
+       encoder = graphUtil.setQuanitzedWeights(encoder,'encoder_'+name+'.pkl')
+       print('unique weights',len(np.unique(encoder.layers[5].get_weights()[0])))
     graphUtil.outputFrozenGraph(encoder,'encoder_'+name+'.pb')
     graphUtil.outputFrozenGraph(encoder,'encoder_'+name+'.pb.ascii','./',True)
     graphUtil.outputFrozenGraph(decoder,'decoder_'+name+'.pb')
@@ -732,13 +742,16 @@ def compareModels(models,perf_dict,eval_settings,options):
     logTotTitle =eval_settings["logTotTitle"]
 
 
-    summary_entries=['name','en_pams','tot_pams']
+    summary_entries=['name','en_pams','tot_pams','en_flops']
     for algname in algnames:
         for mname in metrics:
             name = mname+"_"+algname
             summary_entries.append(mname+"_"+algname)
             summary_entries.append(mname+"_"+algname+"_err")
     summary = pd.DataFrame(columns=summary_entries)
+
+    with open('./performance.pkl', 'wb') as file_pi:
+        pickle.dump(perf_dict, file_pi)
 
     if(not options.skipPlot):
         # overlay different metrics
@@ -757,19 +770,19 @@ def compareModels(models,perf_dict,eval_settings,options):
             OverlayPlots(occs,"ae_comp_occ_"+mname,xtitle=occTitle,ytitle=mname)
             
             # binned profiles 
-            for iocc, occ_lo in enumerate(occ_bins):
-                occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
-                occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
-                pname = "{}occ{}".format(occ_lo,occ_hi_s)
-                chgs=[ (model_name.split('_')[-1], perf_dict[model_name]["chg_{}_{}_ae".format(pname,mname)]) for model_name in perf_dict]
-                xt = logMaxTitle if options.rescaleInputToMax else logTotTitle
-                OverlayPlots(chgs,"ae_comp_chg_{}_{}".format(mname,pname),xtitle=xt,ytitle=mname)
-            for ichg, chg_lo in enumerate(chg_bins):
-                chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
-                chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
-                pname = "{}chg{}".format(chg_lo,chg_hi_s)
-                occs=[ (model_name.split('_')[-1], perf_dict[model_name]["occ_{}_{}_ae".format(pname,mname)]) for model_name in perf_dict]
-                OverlayPlots(occs,"ae_comp_occ_{}_{}".format(mname,pname),xtitle=occTitle,ytitle=mname)
+            #for iocc, occ_lo in enumerate(occ_bins):
+            #    occ_hi = 9e99 if iocc+1==len(occ_bins) else occ_bins[iocc+1]
+            #    occ_hi_s = 'MAX' if iocc+1==len(occ_bins) else str(occ_hi)
+            #    pname = "{}occ{}".format(occ_lo,occ_hi_s)
+            #    chgs=[ (model_name.split('_')[-1], perf_dict[model_name]["chg_{}_{}_ae".format(pname,mname)]) for model_name in perf_dict]
+            #    xt = logMaxTitle if options.rescaleInputToMax else logTotTitle
+            #    OverlayPlots(chgs,"ae_comp_chg_{}_{}".format(mname,pname),xtitle=xt,ytitle=mname)
+            #for ichg, chg_lo in enumerate(chg_bins):
+            #    chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
+            #    chg_hi_s = 'MAX' if ichg+1==len(chg_bins) else str(chg_hi)
+            #    pname = "{}chg{}".format(chg_lo,chg_hi_s)
+            #    occs=[ (model_name.split('_')[-1], perf_dict[model_name]["occ_{}_{}_ae".format(pname,mname)]) for model_name in perf_dict]
+            #    OverlayPlots(occs,"ae_comp_occ_{}_{}".format(mname,pname),xtitle=occTitle,ytitle=mname)
     for model in models:
         print('Summary_dict',model['summary_dict'])
         summary = summary.append(model['summary_dict'], ignore_index=True)
@@ -783,6 +796,7 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
     input_Q_abs  = charges['input_Q_abs']
     input_calQ   = charges['input_calQ']
     output_calQ  = charges['output_calQ']
+    output_calQ_fr  = charges['output_calQ_fr']
     cnn_deQ      = charges['cnn_deQ']
     cnn_enQ      = charges['cnn_enQ']
     val_sum      = charges['val_sum']
@@ -792,7 +806,7 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
     #print('input_Q_abs',input_Q_abs[1]*35)
     #print('input_calQ' ,input_calQ[1]*35)
     #print('val_sum' ,val_sum[1]*35)
-    ae_out = unnormalize(output_calQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
+    ae_out      = output_calQ 
     ae_out_frac = normalize(output_calQ.copy())
 
     #ae_out = unnormalize(cnn_deQ.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
@@ -868,29 +882,36 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
     summary_dict = {
         'name':model_name,
         'en_pams' : model['m_autoCNNen'].count_params(),
+        'en_flops' : get_flops_from_model(model['m_autoCNNen']),
         'tot_pams': model['m_autoCNN'].count_params(),
     }
+    if (not options.skipPlot): plotHist(np.log10(val_sum.flatten()),
+                                        "sumQ_validation",xtitle=logTotTitle,ytitle="Entries",
+                                        stats=True,logy=True,nbins=chglog_nbins,lims = chglog_range)
+    if (not options.skipPlot): plotHist([np.log10(val_max.flatten())],
+                                        "maxQ_validation",xtitle=logMaxTitle,ytitle="Entries",
+                                        stats=True,logy=True,nbins=chglog_nbins,lims = chglog_range)
 
     # compute metrics for each alg
     for algname, alg_out in alg_outs.items():
         print('Calculating metrics for '+algname)
-        # charge fraction comparison
-        if (not options.skipPlot): plotHist([input_Q.flatten(),alg_out.flatten()],
-                                            algname+"_fracQ",xtitle="charge fraction",ytitle="Cells",
-                                            stats=False,logy=True,leg=['input','output'])
-        # abs charge comparison
-        if(not options.skipPlot): plotHist([input_Q_abs.flatten(),alg_out.flatten()],
-                                           algname+"_absQ",xtitle="absolute charge",ytitle="Cells",
-                                           stats=False,logy=True,leg=['input','output'])
-        # abs tower charge comparison (xcheck)
-        if(not options.skipPlot): plotHist([sumTCQ(input_Q_abs),sumTCQ(alg_out)],
-                                           algname+"_absSumTCQ",xtitle="absolute charge",ytitle="48 TC arrays",
-                                           stats=False,logy=True,leg=['input','output'])
+        ## charge fraction comparison
+        #if (not options.skipPlot): plotHist([input_Q.flatten(),alg_out.flatten()],
+        #                                    algname+"_fracQ",xtitle="charge fraction",ytitle="Cells",
+        #                                    stats=False,logy=True,leg=['input','output'])
+        ## abs charge comparison
+        #if(not options.skipPlot): plotHist([input_Q_abs.flatten(),alg_out.flatten()],
+        #                                   algname+"_absQ",xtitle="absolute charge",ytitle="Cells",
+        #                                   stats=False,logy=True,leg=['input','output'])
+        ## abs tower charge comparison (xcheck)
+        #if(not options.skipPlot): plotHist([sumTCQ(input_Q_abs),sumTCQ(alg_out)],
+        #                                   algname+"_absSumTCQ",xtitle="absolute charge",ytitle="48 TC arrays",
+        #                                   stats=False,logy=True,leg=['input','output'])
 
-        # Encoded space distibution 
-        if((not options.skipPlot) and algname=='ae'): plotHist([cnn_enQ.flatten()],
-                                           "hist_"+algname+"_encoded",xtitle="AE encoded vector",ytitle="Entries",
-                                           stats=True,logy=True)
+        ## Encoded space distibution 
+        #if((not options.skipPlot) and algname=='ae'): plotHist([cnn_enQ.flatten()],
+        #                                   "hist_"+algname+"_encoded",xtitle="AE encoded vector",ytitle="Entries",
+        #                                   stats=True,logy=True)
 
         # event displays
         if(not options.skipPlot): visDisplays(index, input_Q, input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=algname)
@@ -906,7 +927,8 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
                 #print("EMD: output Q[1] =",np.round(alg_out[low_index[0]],3))
                 #print("EMD: metric Q[1] =",metric(input_calQ[low_index[0]],alg_out[low_index[0]]))
             else:
-                vals = np.array([metric(input_Q_abs[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
+                #vals = np.array([metric(input_Q_abs[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
+                vals = np.array([metric(input_calQ[i],alg_out[i]) for i in range(0,len(input_Q_abs))])
             model[name]        = np.round(np.mean(vals), 3)
             model[name+'_err'] = np.round(np.std(vals), 3)
             summary_dict[name]        = model[name]
@@ -923,10 +945,11 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
                 plots["chg_"+name] = plotProfile(np.log10(val_max), vals,"profile_maxQ_"+name,ytitle=longMetric[mname],
                                                  nbins=chglog_nbins, lims=chglog_range,
                                                  xtitle=logMaxTitle if options.rescaleInputToMax else logTotTitle)
-                # plotHist(vals[val_max<1],"hist_0chg1_"+name,xtitle=longMetric[mname])
-                # plotHist(vals[val_max<2],"hist_0chg2_"+name,xtitle=longMetric[mname])
-                # plotHist(vals[val_max<5],"hist_0chg5_"+name,xtitle=longMetric[mname])
-                # plotHist(vals[val_max<10],"hist_0chg10_"+name,xtitle=longMetric[mname])
+                #plotHist(vals[val_max<1],"hist_0chg1_"+name,xtitle=longMetric[mname])
+                #plotHist(vals[val_max<2],"hist_0chg2_"+name,xtitle=longMetric[mname])
+                #plotHist(vals[val_max<5],"hist_0chg5_"+name,xtitle=longMetric[mname])
+                #plotHist(vals[val_max<10],"hist_0chg10_"+name,xtitle=longMetric[mname])
+                #plotHist(vals[(val_max>=100)],"hist_chg10+_"+name,xtitle=longMetric[mname])
                 # plotHist(vals[occupancy_1MT<10],"hist_0occ10_"+name,xtitle=longMetric[mname])
                 # plotHist(vals[occupancy_1MT>10],"hist_10occMAX_"+name,xtitle=longMetric[mname])
                 # plotHist(vals[occupancy_1MT>15],"hist_15occMAX_"+name,xtitle=longMetric[mname])
@@ -944,6 +967,11 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
                                                nbins=chglog_nbins, lims=chglog_range,
                                                ytitle=longMetric[mname],
                                                text="{} <= occupancy < {}".format(occ_lo,occ_hi_s,name))
+                    #plotHist(vals[indices].flatten(),"hist_{}_{}occ{}".format(mname,occ_lo,occ_hi_s),
+                    #                           xtitle=longMetric[mname],
+                    #                           nbins=chglog_nbins, lims=None,
+                    #                           )
+
                     print('filling1', model_name, pname)
                 for ichg, chg_lo in enumerate(chg_bins):
                     chg_hi = 9e99 if ichg+1==len(chg_bins) else chg_bins[ichg+1]
@@ -955,21 +983,26 @@ def evalModel(model,charges,aux_arrs,eval_settings,options):
                                                ytitle=longMetric[mname],
                                                nbins=occ_nbins, lims=occ_range,
                                                text="{} <= Max Q < {}".format(chg_lo,chg_hi_s,name))
+                    #plotHist(vals[indices].flatten(),"hist_{}_{}chg{}".format(mname,chg_lo,chg_hi_s),
+                    #                           xtitle=longMetric[mname],
+                    #                           nbins=chglog_nbins, lims=None,
+                    #                           )
+
                     print('filling2', model_name, pname)
                     
                 # displays
-                hi_index = (np.where(vals>np.quantile(vals,0.9)))[0]
-                lo_index = (np.where(vals<np.quantile(vals,0.2)))[0]
-                if len(hi_index)>0:
-                    hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
-                    visDisplays(hi_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90")
-                    hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
-                    visDisplays(hi_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90_2")
-                if len(lo_index)>0:
-                    lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
-                    visDisplays(lo_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20")
-                    lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
-                    visDisplays(lo_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20_2")
+                #hi_index = (np.where(vals>np.quantile(vals,0.9)))[0]
+                #lo_index = (np.where(vals<np.quantile(vals,0.2)))[0]
+                #if len(hi_index)>0:
+                #    hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
+                #    visDisplays(hi_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90")
+                #    hi_index = np.random.choice(hi_index, min(Nevents,len(hi_index)), replace=False)
+                #    visDisplays(hi_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q90_2")
+                #if len(lo_index)>0:
+                #    lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
+                #    visDisplays(lo_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20")
+                #    lo_index = np.random.choice(lo_index, min(Nevents,len(lo_index)), replace=False)
+                #    visDisplays(lo_index, input_Q,input_calQ, alg_out, (cnn_enQ if algname=='ae' else np.array([])),(conv2d if algname=='ae' else None), name=name+"_Q20_2")
             
     # overlay different metrics
     for mname in metrics:
@@ -1011,7 +1044,7 @@ def trainCNN(options, args, pam_updates=None):
     # List devices:
     print(device_lib.list_local_devices())
     print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
-    print("Is GPU available? ", tf.test.is_gpu_available())
+    print("Is GPU available? ", tf.config.list_physical_devices('GPU'))
 
        
     if ("nElinks_%s"%options.nElinks not in options.inputFile):
@@ -1072,15 +1105,16 @@ def trainCNN(options, args, pam_updates=None):
         # metrics to compute on the validation dataset
         'metrics' : {
             'EMD'      :emd,
-            'dMean':d_weighted_mean,
-            'dRMS':d_abs_weighted_rms,
+            #'dMean':d_weighted_mean,
+            #'dRMS':d_abs_weighted_rms,
+            #'cross_corr':cross_corr,
         },
         "occ_nbins"   :12,
         "occ_range"   :(0,24),
         "occ_bins"    : [0,2,5,10,15],
         "chg_nbins"   :20,
         "chg_range"   :(0,200),
-        "chglog_nbins":10,
+        "chglog_nbins":20,
         "chglog_range":(0,2.5),
         "chg_bins"    :[0,2,5,10,50],
         "occTitle"    :r"occupancy [1 MIP$_{\mathrm{T}}$ TCs]"       , 
@@ -1092,7 +1126,6 @@ def trainCNN(options, args, pam_updates=None):
             #'dMean':d_weighted_mean,
             #'dRMS':d_abs_weighted_rms,
             #'zero_frac':(lambda x,y: np.all(y==0)),
-            # 'cross_corr':cross_corr,
             # 'SSD'      :ssd,
         }
         eval_settings['metrics'].update(more_metrics)
@@ -1106,6 +1139,10 @@ def trainCNN(options, args, pam_updates=None):
                  stats=False,logy=True,nbins=50,lims=[0,50])
         plotHist(occupancy_all_1MT.flatten(),"occ_1MT",xtitle=r"occupancy (1 MIP$_{\mathrm{T}}$ cells)",ytitle="evts",
                  stats=False,logy=True,nbins=50,lims=[0,50])
+        plotHist(np.log10(maxdata.flatten()),"maxQ_all",xtitle=eval_settings['logMaxTitle'],ytitle="evts",
+                 stats=False,logy=True,nbins=20,lims=[0,2.5])
+        plotHist(np.log10(sumdata.flatten()),"sumQ_all",xtitle=eval_settings['logTotTitle'],ytitle="evts",
+                 stats=False,logy=True,nbins=20,lims=[0,2.5])
     # keep track of each models performance
     perf_dict={}
     for model in models:
@@ -1117,9 +1154,11 @@ def trainCNN(options, args, pam_updates=None):
             m = qDenseCNN(weights_f=model['ws'])
             print ("m is a qDenseCNN")
             #m.extend = True # for extra inputs
+        elif model['isDense2D']:
+            m = dense2DkernelCNN(weights_f=model['ws'])
+            print ("m is a dense2DkernelCNN")
         else:
             m = denseCNN(weights_f=model['ws'])
-            #m = dense2DkernelCNN(weights_f=model['ws'])
             print ("m is a denseCNN")
         m.setpams(model['pams'])
         m.init()
@@ -1176,14 +1215,19 @@ def trainCNN(options, args, pam_updates=None):
         print("Evaluate AE")
         input_Q, cnn_deQ, cnn_enQ = m.predict(val_input)
         ## use physical arrangements for display
+        print('input_Q shape',input_Q.shape)
         input_calQ  = m.mapToCalQ(input_Q)   # shape = (N,48) in CALQ order
-        output_calQ = m.mapToCalQ(cnn_deQ)   # shape = (N,48) in CALQ order
+        print('input_calQ shape',input_calQ.shape)
+        output_calQ_fr = m.mapToCalQ(cnn_deQ)   # shape = (N,48) in CALQ order
         print("Save CSVs")
         ## csv files for RTL verification
         N_csv= (options.nCSV if options.nCSV>=0 else input_Q.shape[0]) # about 80k
-        np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
+        AEvol = m.pams['shape'][0]* m.pams['shape'][1] *  m.pams['shape'][2] 
+        np.savetxt("verify_input.csv", input_Q[0:N_csv].reshape(N_csv,AEvol), delimiter=",",fmt='%.12f')
+        np.savetxt("verify_input_calQ.csv", input_calQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
         np.savetxt("verify_output.csv",cnn_enQ[0:N_csv].reshape(N_csv,m.pams['encoded_dim']), delimiter=",",fmt='%.12f')
-        np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
+        np.savetxt("verify_decoded.csv",cnn_deQ[0:N_csv].reshape(N_csv,AEvol), delimiter=",",fmt='%.12f')
+        np.savetxt("verify_decoded_calQ.csv",output_calQ_fr[0:N_csv].reshape(N_csv,48), delimiter=",",fmt='%.12f')
 
 
 
@@ -1191,16 +1235,18 @@ def trainCNN(options, args, pam_updates=None):
         print("Restore normalization")
         input_Q_abs = np.array([input_Q[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_Q))])
         input_calQ  = np.array([input_calQ[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_calQ)) ])  # shape = (N,48) in CALQ order
-        # input_Q_abs = np.multiply(input_Q, val_max)
-
-        occupancy_0MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48),axis=1)
-        occupancy_1MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48)>1.,axis=1)
+        output_calQ =  unnormalize(output_calQ_fr.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
+        #occupancy_0MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48),axis=1)
+        #occupancy_1MT = np.count_nonzero(input_Q_abs.reshape(len(input_Q),48)>1.,axis=1)
+        occupancy_0MT = np.count_nonzero(input_calQ.reshape(len(input_Q),48),axis=1)
+        occupancy_1MT = np.count_nonzero(input_calQ.reshape(len(input_Q),48)>1.,axis=1)
 
         charges = {
-            'input_Q'    : input_Q,         # shape = (N,4,4,3)
-            'input_Q_abs': input_Q_abs,     # shape = (N,4,4,3) (in abs Q)
-            'input_calQ' : input_calQ,      # shape = (N,48) (in abs Q)   (in CALQ 1-48 order)
-            'output_calQ': output_calQ,     # shape = (N,48) (in fr Q)   (in CALQ 1-48 order)
+            'input_Q'    : input_Q,               # shape = (N,4,4,3)
+            'input_Q_abs': input_Q_abs,           # shape = (N,4,4,3) (in abs Q)
+            'input_calQ' : input_calQ,            # shape = (N,48) (in abs Q)   (in CALQ 1-48 order)
+            'output_calQ': output_calQ,           # shape = (N,48) (in abs Q)   (in CALQ 1-48 order)
+            'output_calQ_fr': output_calQ_fr,     # shape = (N,48) (in Q fr)   (in CALQ 1-48 order)
             'cnn_deQ'    : cnn_deQ,
             'cnn_enQ'    : cnn_enQ,
             'val_sum'    : val_sum,
@@ -1213,6 +1259,9 @@ def trainCNN(options, args, pam_updates=None):
         #perf_dict[model_name] , model['summary_dict'] = evalModel(model,charges,aux_arrs,eval_settings,options)
         perf_dict[model['label']] , model['summary_dict'] = evalModel(model,charges,aux_arrs,eval_settings,options)
 
+        if not options.skipPlot:
+            with open('./performance_%s.pkl'%model_name, 'wb') as file_pi:
+                pickle.dump({ model['label']:  perf_dict[model['label']]}  , file_pi)
         occupancy=occupancy_0MT
         if(not options.skipPlot): plotHist(occupancy.flatten(),"occ",xtitle="occupancy",ytitle="evts",
                                                stats=False,logy=True,nbins=50,lims=[0,50])
