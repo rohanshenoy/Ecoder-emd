@@ -131,18 +131,7 @@ class dense2DkernelCNN(denseCNN):
         if printSummary:
           self.autoencoder.summary()
 
-        if self.pams['loss']=="weightedMSE":
-            self.autoencoder.compile(loss=self.weightedMSE, optimizer='adam')
-            self.encoder.compile(loss=self.weightedMSE, optimizer='adam')
-        elif self.pams['loss'] == 'telescopeMSE':
-            self.autoencoder.compile(loss=telescopeMSE2, optimizer='adam')
-            self.encoder.compile(loss=telescopeMSE2, optimizer='adam')
-        elif self.pams['loss']!='':
-            self.autoencoder.compile(loss=self.pams['loss'], optimizer='adam')
-            self.encoder.compile(loss=self.pams['loss'], optimizer='adam')
-        else:
-            self.autoencoder.compile(loss='mse', optimizer='adam')
-            self.encoder.compile(loss='mse', optimizer='adam')
+        self.compileModels()
 
         CNN_layers=''
         if len(CNN_layer_nodes)>0:

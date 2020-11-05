@@ -192,21 +192,8 @@ class denseCNN:
         self.autoencoder = Model(inputs, self.decoder(self.encoder(inputs)), name='autoencoder')
         if printSummary:
           self.autoencoder.summary()
-
-        opt = self.pams['optimizer']
-
-        if self.pams['loss']=="weightedMSE":
-            self.autoencoder.compile(loss=self.weightedMSE, optimizer=opt)
-            self.encoder.compile(loss=self.weightedMSE, optimizer=opt)
-        elif self.pams['loss'] == 'telescopeMSE':
-            self.autoencoder.compile(loss=telescopeMSE2, optimizer=opt)
-            self.encoder.compile(loss=telescopeMSE2, optimizer=opt)
-        elif self.pams['loss']!='':
-            self.autoencoder.compile(loss=self.pams['loss'], optimizer=opt)
-            self.encoder.compile(loss=self.pams['loss'], optimizer=opt)
-        else:
-            self.autoencoder.compile(loss='mse', optimizer=opt)
-            self.encoder.compile(loss='mse', optimizer=opt)
+        
+        self.compileModels()
 
         CNN_layers=''
         if len(CNN_layer_nodes)>0:
@@ -225,6 +212,28 @@ class denseCNN:
         
         if not self.weights_f=='':
             self.autoencoder.load_weights(self.weights_f)
+        return
+
+
+    def compileModels(self):
+        opt = self.pams['optimizer']
+
+        print('Using optimizer', opt)
+        if self.pams['loss']=="weightedMSE":
+            self.autoencoder.compile(loss=self.weightedMSE, optimizer=opt)
+            self.encoder.compile(loss=self.weightedMSE, optimizer=opt)
+        elif self.pams['loss'] == 'telescopeMSE':
+            self.autoencoder.compile(loss=telescopeMSE2, optimizer=opt)
+            self.encoder.compile(loss=telescopeMSE2, optimizer=opt)
+        elif self.pams['loss']!='':
+            self.autoencoder.compile(loss=self.pams['loss'], optimizer=opt)
+            self.encoder.compile(loss=self.pams['loss'], optimizer=opt)
+        else:
+            self.autoencoder.compile(loss='mse', optimizer=opt)
+            self.encoder.compile(loss='mse', optimizer=opt)
+        return
+
+
     def get_models(self):
        return self.autoencoder,self.encoder
 
