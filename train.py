@@ -48,7 +48,7 @@ def normalize(data,rescaleInputToMax=False, sumlog2=True):
     for i in range(len(data)):
         maxes.append( data[i].max() )
         sums.append( data[i].sum() )
-        sums_log2.append( 2**(np.ceil(np.log2(data[i].sum()))) )
+        sums_log2.append( 2**(np.floor(np.log2(data[i].sum()))) )
         if sumlog2:
             data[i] = 1.*data[i]/(sums_log2[-1] if sums_log2[-1] else 1.)
         efif rescaleInputToMax:
@@ -65,7 +65,7 @@ def unnormalize(norm_data,maxvals,rescaleOutputToMax=False, sumlog2=True):
             norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].max() if norm_data[i].max() else 1.)
         else:
             if sumlog2:
-                sumlog2 = 2**(np.ceil(np.log2(data[i].sum())))
+                sumlog2 = 2**(np.floor(np.log2(data[i].sum())))
                 norm_data[i] =  norm_data[i] * maxvals[i] / (sumlog2 if sumlog2 else 1.)
             else:
                 norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].sum() if norm_data[i].sum() else 1.)
