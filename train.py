@@ -41,25 +41,34 @@ def double_data(data):
     return np.array(doubled)
 
 @numba.jit
-def normalize(data,rescaleInputToMax=False):
+def normalize(data,rescaleInputToMax=False, sumlog2=True):
     maxes =[]
     sums =[]
+    sums_log2=[]
     for i in range(len(data)):
         maxes.append( data[i].max() )
         sums.append( data[i].sum() )
-        if rescaleInputToMax:
+        sums_log2.append( 2**(np.floor(np.log2(data[i].sum()))) )
+        if sumlog2:
+            data[i] = 1.*data[i]/(sums_log2[-1] if sums_log2[-1] else 1.)
+        efif rescaleInputToMax:
             data[i] = 1.*data[i]/(data[i].max() if data[i].max() else 1.)
         else:
             data[i] = 1.*data[i]/(data[i].sum() if data[i].sum() else 1.)
+    if sumlog2: data,np.array(maxes),np.array(sums_log2)
     return data,np.array(maxes),np.array(sums)
 
 @numba.jit
-def unnormalize(norm_data,maxvals,rescaleOutputToMax=False):
+def unnormalize(norm_data,maxvals,rescaleOutputToMax=False, sumlog2=True):
     for i in range(len(norm_data)):
         if rescaleOutputToMax:
             norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].max() if norm_data[i].max() else 1.)
         else:
-            norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].sum() if norm_data[i].sum() else 1.)
+            if sumlog2:
+                sumlog2 = 2**(np.floor(np.log2(data[i].sum())))
+                norm_data[i] =  norm_data[i] * maxvals[i] / (sumlog2 if sumlog2 else 1.)
+            else:
+                norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].sum() if norm_data[i].sum() else 1.)
     return norm_data
 
 def StringToTextFile(fname,s):
