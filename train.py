@@ -51,12 +51,14 @@ def normalize(data,rescaleInputToMax=False, sumlog2=True):
         sums_log2.append( 2**(np.floor(np.log2(data[i].sum()))) )
         if sumlog2:
             data[i] = 1.*data[i]/(sums_log2[-1] if sums_log2[-1] else 1.)
-        efif rescaleInputToMax:
+        elif rescaleInputToMax:
             data[i] = 1.*data[i]/(data[i].max() if data[i].max() else 1.)
         else:
             data[i] = 1.*data[i]/(data[i].sum() if data[i].sum() else 1.)
-    if sumlog2: data,np.array(maxes),np.array(sums_log2)
-    return data,np.array(maxes),np.array(sums)
+    if sumlog2:
+        return  data,np.array(maxes),np.array(sums_log2)
+    else:
+        return data,np.array(maxes),np.array(sums)
 
 @numba.jit
 def unnormalize(norm_data,maxvals,rescaleOutputToMax=False, sumlog2=True):
@@ -65,7 +67,7 @@ def unnormalize(norm_data,maxvals,rescaleOutputToMax=False, sumlog2=True):
             norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].max() if norm_data[i].max() else 1.)
         else:
             if sumlog2:
-                sumlog2 = 2**(np.floor(np.log2(data[i].sum())))
+                sumlog2 = 2**(np.floor(np.log2(norm_data[i].sum())))
                 norm_data[i] =  norm_data[i] * maxvals[i] / (sumlog2 if sumlog2 else 1.)
             else:
                 norm_data[i] =  norm_data[i] * maxvals[i] / (norm_data[i].sum() if norm_data[i].sum() else 1.)
@@ -1248,7 +1250,7 @@ def trainCNN(options, args, pam_updates=None):
         output_calQ_fr = m.mapToCalQ(cnn_deQ)   # shape = (N,48) in CALQ order
 
         print("Restore normalization")
-        input_Q_abs = np.array([input_Q[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_Q))])
+        input_Q_abs = np.array([input_Q[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_Q))]) * 35.   # restore abs input in CALQ unit
         input_calQ  = np.array([input_calQ[i]*(val_max[i] if options.rescaleInputToMax else val_sum[i]) for i in range(0,len(input_calQ)) ])  # shape = (N,48) in CALQ order
         output_calQ =  unnormalize(output_calQ_fr.copy(), val_max if options.rescaleOutputToMax else val_sum, rescaleOutputToMax=options.rescaleOutputToMax)
 
