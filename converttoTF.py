@@ -1,13 +1,5 @@
 #!/usr/bin/env python
 
-#import imp
-#try:
-#    imp.find_module('setGPU')
-#    import setGPU
-#except ImportError:
-#    found = False
-            
-          
 from tensorflow.keras.models import model_from_json  
 from argparse import ArgumentParser
 from keras import backend as K
@@ -31,7 +23,7 @@ def _get_available_gpus():
         tfback._LOCAL_DEVICES = [x.name for x in devices]
     return [x for x in tfback._LOCAL_DEVICES if 'device:gpu' in x.lower()]
 
-def saveTFgraph(tfsession,pred_node_names,tfoutpath,graphname):
+def save_graph(tfsession,pred_node_names,tfoutpath,graphname):
     saver = tfv1.train.Saver()
     
     from tensorflow.python.framework import graph_util
@@ -62,7 +54,6 @@ if tf.__version__.startswith("2."):
     tfv1 = tf.compat.v1
 tfv1.disable_eager_execution()
 
-
 parser = ArgumentParser('')
 parser.add_argument('-i','--inputModel',dest='inputModel',default='./models/no-weight.json')
 parser.add_argument('-o','--outputDir',dest='outputDir',default='./')
@@ -72,7 +63,6 @@ parser.add_argument('--outputGraph',dest='outputGraph',default='encoder')
 args = parser.parse_args()
 
 print(args.outputDir)
-
 
 f_model = args.inputModel
 with open(f_model,'r') as f:
@@ -99,14 +89,6 @@ print(model.summary())
 ## get_session is deprecated in tf2
 tfsession = tfv1.keras.backend.get_session()
 
-## From output node of (q)DenseCNN model framework + tfsession.graph.as_graph_def()
-#decoder_node_names = ['decoder_output/Sigmoid']
-#encoder_node_names = ['encoder/encoded_vector/Relu']
-
 graph_node_names = [args.outputLayer]
 
-saveTFgraph(tfsession,graph_node_names,args.outputDir,args.outputGraph)
-
-#saveTFgraph(tfsession,encoder_node_names,args.outputDir,'encoder')
-#saveTFgraph(tfsession,decoder_node_names,args.outputDir,'decoder')
-#saveTFgraph(tfsession,decoder_node_names+encoder_node_names,args.outputDir,'fullmodel')
+save_graph(tfsession,graph_node_names,args.outputDir,args.outputGraph)
