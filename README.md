@@ -35,12 +35,20 @@ or from cernbox: https://cernbox.cern.ch/index.php/s/YpAWu24aw6EaBk7
 
 Electron samples: (neLinks 2-5 with sim-Energy information) `/eos/uscms/store/user/dnoonan/AE_TrainingData/NewData/Skim/ele200PUData_TrainingData_SignalAllocation/`
 
-## Training
+## Training emd_loss approximation using CNNs
 
-Once you have downloaded the data you can do:
+You can train CNN(s) on the dataset to obtain a differentiable approximation of the EMD, which saves 8 different loss functions as emd_loss1 ...
 
 ```
-python3 train.py -i data/V11/SampleSplitting_SignalAllocation/nElinks_5/shuffled/  -o ./test/ --epoch 1 --AEonly 1 --nELinks 5 --noHeader
+python3 train_emdloss.py -i data/V11/SampleSplitting_SignalAllocation/nElinks_5/shuffled/ --epoch 50
+```
+
+## Training ECON-T autoencoder
+
+The default model uses the telescope loss, we can compare the performance of the autoencoder with the emd_loss's as such:
+
+```
+python3 train.py -i data/V11/SampleSplitting_SignalAllocation/nElinks_5/shuffled/  -o ./test/ --epoch 1 --AEonly 1 --nELinks 5 --noHeader --models 8x8_c8_S2_tele,8x8_c8_S2_emd6
 ```
 
 here:
@@ -169,3 +177,4 @@ Each row in the file represents a module but several rows can correspond to one 
 The output (and training) data from this last step (from the ECON-T simulation), can be found here:
 - ttbar: (neLinks 2-5 and no sim-Energy infomation) https://cernbox.cern.ch/index.php/s/YpAWu24aw6EaBk7
 - electron samples: (neLinks 2-5 with sim-Energy information) `/eos/uscms/store/user/dnoonan/AE_TrainingData/NewData/Skim/ele200PUData_TrainingData_SignalAllocation/`
+
