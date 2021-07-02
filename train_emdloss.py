@@ -85,7 +85,15 @@ def main(args):
    
     """
     #List of lists of Hyperparamters <- currently initialized from previous training
-    hyp_list=[[32,5,256,1,3]]
+    hyp_list=[[32,5,256,1,3],
+              [32,5,32,1,4],
+              [64,5,32,1,4],
+              [128,5,32,1,4],
+              [128,5,64,1,3],
+              [32,5,128,1,3],
+              [128,3,256,1,4],
+              [128,5,256,1,4]
+              ]
 
     num_epochs=args.num_epochs
     best_num=args.best_num
@@ -103,7 +111,7 @@ def main(args):
         
         #Each model per set of hyperparamters is trained thrice to avoid bad initialitazion discarding a good model. (We vary num_epochs by 1 to differentiate between these 3 trainings)
         
-        for i in [0,1]:
+        for i in [0,1,2]:
             obj=get_emdloss.EMD_CNN(True)
             mean, sd = obj.ittrain(data, num_filt,kernel_size, num_dens_neurons, num_dens_layers, num_conv_2d,num_epochs+i)
             mean_data.append(mean)
